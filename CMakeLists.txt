@@ -6,7 +6,7 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Check compiler - CEF requires MSVC
@@ -18,12 +18,12 @@ endif()
 
 # Qt configuration
 if(NOT CMAKE_PREFIX_PATH)
-    set(CMAKE_PREFIX_PATH "D:/Qt/6.10.1/msvc2022_64")
+    set(CMAKE_PREFIX_PATH "D:/Qt/6.10.3/msvc2022_64")
 endif()
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui Network)
 
 # CEF configuration
-set(CEF_ROOT "D:/GitHub/cef")
+set(CEF_ROOT "D:/soft/cef_binary_154.0.34+g14c5a08+chromium-154.0.8037.98_windows64")
 set(CEF_INCLUDE_PATH "${CEF_ROOT}" "${CEF_ROOT}/include")
 
 # Source files
@@ -56,6 +56,8 @@ set(PROJECT_SOURCES
     # Utils
     src/Utils/Logger.h
     src/Utils/Logger.cpp
+    src/Utils/LanguageFilter.h
+    src/Utils/LanguageFilter.cpp
 )
 
 # Create executable

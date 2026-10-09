@@ -12,6 +12,7 @@
 #include <QTableWidget>
 #include <QList>
 #include <QTextEdit>
+#include <QComboBox>
 #include "Data/Post.h"
 #include "Data/Keyword.h"
 
@@ -44,9 +45,11 @@ private slots:
     void onFollowSuccess(const QString& userHandle);
     void onAlreadyFollowing(const QString& userHandle);
     void onFollowFailed(const QString& userHandle);
+    void onFollowSkippedLang(const QString& userHandle);
     void onAccountSuspended(const QString& userHandle);
     void onHideFollowedChanged(bool checked);
     void onKeywordsChanged();
+    void onLanguageChanged();
     void onCooldownTick();
     void onFollowedAuthorDoubleClicked(int row, int column);
     void onKeywordDoubleClicked(const QString& keyword);
@@ -109,6 +112,7 @@ private:
     QSpinBox* m_cooldownMaxSpinBox;
     QPushButton* m_autoFollowBtn;
     QSpinBox* m_unfollowDaysSpinBox;  // 取关天数设置
+    QComboBox* m_languageComboBox;    // 目标语言（单选）
 
     // 右侧浏览器 - 用户页
     QWidget* m_rightPanel;
@@ -129,6 +133,7 @@ private:
     // 数据
     QList<Post> m_posts;
     QList<Keyword> m_keywords;
+    QString m_selectedLanguage;  // 目标语言 code
 
     // CEF timer
     int m_cefTimerId;

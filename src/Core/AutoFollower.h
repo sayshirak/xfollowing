@@ -10,8 +10,8 @@ class AutoFollower : public QObject {
 public:
     explicit AutoFollower(QObject* parent = nullptr);
 
-    // 获取关注脚本
-    QString getFollowScript();
+    // 获取关注脚本（含语言过滤）
+    QString getFollowScript(const QString& selectedLang);
 
     // 获取回关检查脚本（检查对方是否关注我）
     QString getCheckFollowBackScript();

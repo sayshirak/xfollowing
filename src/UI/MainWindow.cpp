@@ -6,6 +6,7 @@
 #include "Data/DataStorage.h"
 #include "Core/PostMonitor.h"
 #include "Core/AutoFollower.h"
+#include "Utils/LanguageFilter.h"
 #include <QCloseEvent>
 #include <QSettings>
 #include <QDebug>
@@ -42,6 +43,7 @@ MainWindow::MainWindow(QWidget* parent)
     , m_cooldownMaxSpinBox(nullptr)
     , m_autoFollowBtn(nullptr)
     , m_unfollowDaysSpinBox(nullptr)
+    , m_languageComboBox(nullptr)
     , m_rightPanel(nullptr)
     , m_cooldownLabel(nullptr)
     , m_userBrowser(nullptr)
@@ -67,7 +69,8 @@ MainWindow::MainWindow(QWidget* parent)
     , m_consecutiveFailures(0)
     , m_isSleeping(false)
     , m_remainingSleepSeconds(0)
-    , m_sleepTimer(nullptr) {
+    , m_sleepTimer(nullptr)
+    , m_selectedLanguage(LanguageFilter::defaultLanguage()) {
 
     setWindowTitle("X互关宝 - X.com互关粉丝助手");
     resize(1600, 900);
@@ -269,6 +272,17 @@ void MainWindow::setupUI() {
     cooldownLayout->addWidget(unfollowDaysLabel);
     cooldownLayout->addWidget(m_unfollowDaysSpinBox);
 
+    // 语言选择（单选）
+    QLabel* languageLabel = new QLabel("语言选择:", m_centerPanel);
+    m_languageComboBox = new QComboBox(m_centerPanel);
+    for (const auto& opt : LanguageFilter::allLanguageOptions()) {
+        m_languageComboBox->addItem(opt.second, opt.first);
+    }
+    m_languageComboBox->setCurrentIndex(0);
+    m_languageComboBox->setToolTip("按显示名和个人简介语言筛选用户");
+    cooldownLayout->addWidget(languageLabel);
+    cooldownLayout->addWidget(m_languageComboBox);
+
     cooldownLayout->addStretch();
 
     // 打开数据文件夹按钮
@@ -382,6 +396,7 @@ void MainWindow::setupConnections() {
     connect(m_userBrowser, &BrowserWidget::followSuccess, this, &MainWindow::onFollowSuccess);
     connect(m_userBrowser, &BrowserWidget::alreadyFollowing, this, &MainWindow::onAlreadyFollowing);
     connect(m_userBrowser, &BrowserWidget::followFailed, this, &MainWindow::onFollowFailed);
+    connect(m_userBrowser, &BrowserWidget::followSkippedLang, this, &MainWindow::onFollowSkippedLang);
     connect(m_userBrowser, &BrowserWidget::accountSuspended, this, &MainWindow::onAccountSuspended);
     // 回关检查信号
     connect(m_userBrowser, &BrowserWidget::checkFollowsBack, this, &MainWindow::onCheckFollowsBack);
@@ -399,6 +414,10 @@ void MainWindow::setupConnections() {
 
     // 关键词变化
     connect(m_keywordPanel, &KeywordPanel::keywordsChanged, this, &MainWindow::onKeywordsChanged);
+
+    // 语言变化
+    connect(m_languageComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &MainWindow::onLanguageChanged);
 
     // 双击关键词跳转到Latest搜索
     connect(m_keywordPanel, &KeywordPanel::keywordDoubleClicked, this, &MainWindow::onKeywordDoubleClicked);
@@ -427,6 +446,22 @@ void MainWindow::loadSettings() {
     // 隐藏已关注（默认true）
     m_hideFollowedCheckBox->setChecked(settings.value("hideFollowed", true).toBool());
 
+    // 目标语言（阻断信号，避免启动时重复注入脚本）
+    m_selectedLanguage = settings.value("selectedLanguage", LanguageFilter::defaultLanguage()).toString();
+    // 旧版简/繁 code 统一迁移为中文
+    if (m_selectedLanguage == "zh-Hans" || m_selectedLanguage == "zh-Hant") {
+        m_selectedLanguage = QStringLiteral("zh");
+    }
+    const int langIdx = m_languageComboBox->findData(m_selectedLanguage);
+    m_languageComboBox->blockSignals(true);
+    if (langIdx >= 0) {
+        m_languageComboBox->setCurrentIndex(langIdx);
+    } else {
+        m_selectedLanguage = LanguageFilter::defaultLanguage();
+        m_languageComboBox->setCurrentIndex(0);
+    }
+    m_languageComboBox->blockSignals(false);
+
     // 冷却时间设置
     m_cooldownMinSeconds = settings.value("cooldownMin", 60).toInt();
     m_cooldownMaxSeconds = settings.value("cooldownMax", 180).toInt();
@@ -443,6 +478,7 @@ void MainWindow::saveSettings() {
     settings.setValue("windowState", saveState());
     settings.setValue("splitterSizes", m_mainSplitter->saveState());
     settings.setValue("hideFollowed", m_hideFollowedCheckBox->isChecked());
+    settings.setValue("selectedLanguage", m_selectedLanguage);
 
     // 保存冷却时间设置
     settings.setValue("cooldownMin", m_cooldownMinSpinBox->value());
@@ -550,7 +586,7 @@ void MainWindow::onUserLoadFinished(bool success) {
         m_statusLabel->setText(QString("状态: 正在关注 @%1...").arg(m_currentFollowingHandle));
 
         // 执行自动关注脚本
-        QString script = m_autoFollower->getFollowScript();
+        QString script = m_autoFollower->getFollowScript(m_selectedLanguage);
         m_userBrowser->ExecuteJavaScript(script);
     }
 }
@@ -610,6 +646,9 @@ void MainWindow::onNewPostsFound(const QString& jsonData) {
         post.content = obj["content"].toString();
         post.postUrl = obj["postUrl"].toString();
         post.matchedKeyword = obj["matchedKeyword"].toString();
+        post.bio = obj["bio"].toString();
+        post.nameLang = obj["nameLang"].toString();
+        post.bioLang = obj["bioLang"].toString();
         post.collectTime = QDateTime::currentDateTime();
 
         // 解析帖子发布时间
@@ -624,6 +663,15 @@ void MainWindow::onNewPostsFound(const QString& jsonData) {
         if (post.authorHandle.isEmpty() || post.postId.isEmpty()) {
             continue;
         }
+
+        // C++ 侧语言再过滤（防旧脚本/竞态）
+        QString nameLang, bioLang;
+        if (!LanguageFilter::passesLanguageFilter(post.authorName, post.bio, m_selectedLanguage,
+                                                  &nameLang, &bioLang)) {
+            continue;
+        }
+        post.nameLang = nameLang;
+        post.bioLang = bioLang;
 
         // 去重：按作者去重（同一作者只保留一条帖子，因为目的是关注用户）
         bool exists = false;
@@ -741,6 +789,29 @@ void MainWindow::onFollowFailed(const QString& userHandle) {
     }
 }
 
+void MainWindow::onFollowSkippedLang(const QString& userHandle) {
+    qDebug() << "[INFO] Follow skipped by language:" << userHandle;
+
+    appendLog(QString("跳过 @%1：语言不符").arg(userHandle));
+    m_statusLabel->setText(QString("状态: @%1 语言不符，已跳过").arg(userHandle));
+    m_currentFollowingHandle.clear();
+
+    // 从待关注列表移除，避免自动关注反复选中同一用户
+    for (int i = m_posts.size() - 1; i >= 0; --i) {
+        if (m_posts[i].authorHandle == userHandle) {
+            m_posts.removeAt(i);
+        }
+    }
+    m_dataStorage->savePosts(m_posts);
+    m_postListPanel->setPosts(m_posts);
+    updateStatusBar();
+
+    // 自动关注模式下继续下一个，不进冷却
+    if (m_isAutoFollowing) {
+        QTimer::singleShot(1000, this, &MainWindow::processNextAutoFollow);
+    }
+}
+
 void MainWindow::onAccountSuspended(const QString& userHandle) {
     qDebug() << "[WARNING] Account suspended:" << userHandle;
 
@@ -780,6 +851,21 @@ void MainWindow::onKeywordsChanged() {
     injectMonitorScript();
 }
 
+void MainWindow::onLanguageChanged() {
+    m_selectedLanguage = m_languageComboBox->currentData().toString();
+    saveSettings();
+
+    // 浏览器就绪后再重新注入采集脚本
+    if (m_searchBrowserInitialized && m_searchBrowser) {
+        injectMonitorScript();
+    }
+    if (m_followersBrowserInitialized && m_followersBrowser) {
+        injectFollowersMonitorScript();
+    }
+
+    appendLog(QString("目标语言已切换: %1").arg(m_languageComboBox->currentText()));
+}
+
 void MainWindow::updateStatusBar() {
     int total = m_posts.size();
     int followed = 0;
@@ -798,9 +884,12 @@ void MainWindow::updateStatusBar() {
 }
 
 void MainWindow::injectMonitorScript() {
-    QString script = m_postMonitor->getMonitorScript(m_keywords);
+    if (!m_searchBrowser) {
+        return;
+    }
+    QString script = m_postMonitor->getMonitorScript(m_keywords, m_selectedLanguage);
     m_searchBrowser->ExecuteJavaScript(script);
-    qDebug() << "[INFO] Monitor script injected";
+    qDebug() << "[INFO] Monitor script injected, lang:" << m_selectedLanguage;
 }
 
 void MainWindow::addPinnedAuthorPost() {
@@ -1463,9 +1552,12 @@ void MainWindow::onFollowersLoadFinished(bool success) {
 }
 
 void MainWindow::injectFollowersMonitorScript() {
-    QString script = m_postMonitor->getFollowersMonitorScript();
+    if (!m_followersBrowser) {
+        return;
+    }
+    QString script = m_postMonitor->getFollowersMonitorScript(m_selectedLanguage);
     m_followersBrowser->ExecuteJavaScript(script);
-    qDebug() << "[INFO] Followers monitor script injected";
+    qDebug() << "[INFO] Followers monitor script injected, lang:" << m_selectedLanguage;
 }
 
 void MainWindow::startFollowersBrowsing() {
@@ -1561,8 +1653,20 @@ void MainWindow::onNewFollowersFound(const QString& jsonData) {
             post.authorUrl = obj["authorUrl"].toString();
             post.content = "[粉丝采集] 来自互关用户的蓝V粉丝";
             post.matchedKeyword = "粉丝采集";
+            post.bio = obj["bio"].toString();
+            post.nameLang = obj["nameLang"].toString();
+            post.bioLang = obj["bioLang"].toString();
             post.collectTime = QDateTime::currentDateTime();
             post.isFollowed = false;
+
+            // C++ 侧语言再过滤
+            QString nameLang, bioLang;
+            if (!LanguageFilter::passesLanguageFilter(post.authorName, post.bio, m_selectedLanguage,
+                                                      &nameLang, &bioLang)) {
+                continue;
+            }
+            post.nameLang = nameLang;
+            post.bioLang = bioLang;
 
             m_posts.append(post);
             m_dataStorage->addPost(post);

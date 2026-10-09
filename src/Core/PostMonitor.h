@@ -12,11 +12,11 @@ class PostMonitor : public QObject {
 public:
     explicit PostMonitor(QObject* parent = nullptr);
 
-    // 获取监控脚本
-    QString getMonitorScript(const QList<Keyword>& keywords);
+    // 获取监控脚本（含语言过滤）
+    QString getMonitorScript(const QList<Keyword>& keywords, const QString& selectedLang);
 
-    // 获取粉丝页面监控脚本
-    QString getFollowersMonitorScript();
+    // 获取粉丝页面监控脚本（含语言过滤）
+    QString getFollowersMonitorScript(const QString& selectedLang);
 
 private:
     QString buildKeywordsArray(const QList<Keyword>& keywords);

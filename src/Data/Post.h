@@ -16,6 +16,9 @@ struct Post {
     QDateTime postTime;        // 帖子发布时间
     QDateTime collectTime;     // 采集时间
     QString matchedKeyword;    // 匹配的关键词
+    QString bio;               // 个人简介
+    QString nameLang;          // 显示名语言 code
+    QString bioLang;           // 简介语言 code
     bool isFollowed = false;   // 是否已关注
     bool isHidden = false;     // 是否隐藏
     QDateTime followTime;      // 关注时间
@@ -32,6 +35,9 @@ struct Post {
         obj["postTime"] = postTime.toString(Qt::ISODate);
         obj["collectTime"] = collectTime.toString(Qt::ISODate);
         obj["matchedKeyword"] = matchedKeyword;
+        obj["bio"] = bio;
+        obj["nameLang"] = nameLang;
+        obj["bioLang"] = bioLang;
         obj["isFollowed"] = isFollowed;
         obj["isHidden"] = isHidden;
         obj["followTime"] = followTime.toString(Qt::ISODate);
@@ -50,6 +56,9 @@ struct Post {
         post.postTime = QDateTime::fromString(obj["postTime"].toString(), Qt::ISODate);
         post.collectTime = QDateTime::fromString(obj["collectTime"].toString(), Qt::ISODate);
         post.matchedKeyword = obj["matchedKeyword"].toString();
+        post.bio = obj["bio"].toString();
+        post.nameLang = obj["nameLang"].toString();
+        post.bioLang = obj["bioLang"].toString();
         post.isFollowed = obj["isFollowed"].toBool();
         post.isHidden = obj["isHidden"].toBool();
         post.followTime = QDateTime::fromString(obj["followTime"].toString(), Qt::ISODate);
