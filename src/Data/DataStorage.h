@@ -45,9 +45,9 @@ public:
 private:
     void ensureDataDir();
 
-    QString m_dataPath;      // 数据目录 (%LOCALAPPDATA%/xfollowing/data)
+    QString m_dataPath;      // 数据目录 (exe目录/data)
     QString m_profilePath;   // 浏览器配置目录 (exe目录/userdata/default)
-    QString m_backupPath;    // 备份目录 (%LOCALAPPDATA%/xfollowing/backups)
+    QString m_backupPath;    // 备份目录 (exe目录/backups)
 };
 
 #endif // DATASTORAGE_H

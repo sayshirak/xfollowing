@@ -9,6 +9,8 @@
 #include "Utils/LanguageFilter.h"
 #include <QCloseEvent>
 #include <QSettings>
+#include <QCoreApplication>
+#include <QFile>
 #include <QDebug>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -435,7 +437,22 @@ void MainWindow::setupConnections() {
 }
 
 void MainWindow::loadSettings() {
-    QSettings settings("xfollowing", "X互关宝");
+    const QString iniPath = QCoreApplication::applicationDirPath() + "/settings.ini";
+    QSettings settings(iniPath, QSettings::IniFormat);
+
+    // 首次使用：从旧版注册表配置迁移到 exe 旁 settings.ini
+    if (!QFile::exists(iniPath)) {
+        QSettings oldSettings("xfollowing", "X互关宝");
+        const QStringList keys = oldSettings.allKeys();
+        for (const QString& key : keys) {
+            settings.setValue(key, oldSettings.value(key));
+        }
+        if (!keys.isEmpty()) {
+            settings.sync();
+            qDebug() << "[INFO] Migrated settings from registry to" << iniPath;
+        }
+    }
+
     restoreGeometry(settings.value("geometry").toByteArray());
     restoreState(settings.value("windowState").toByteArray());
 
@@ -473,7 +490,7 @@ void MainWindow::loadSettings() {
 }
 
 void MainWindow::saveSettings() {
-    QSettings settings("xfollowing", "X互关宝");
+    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
     settings.setValue("geometry", saveGeometry());
     settings.setValue("windowState", saveState());
     settings.setValue("splitterSizes", m_mainSplitter->saveState());

@@ -11,15 +11,11 @@
 
 DataStorage::DataStorage(QObject* parent)
     : QObject(parent) {
-    // 浏览器数据放在exe目录下（CEF需要）
+    // 浏览器数据、配置数据均放在 exe 目录下（便携）
     QString appDir = QCoreApplication::applicationDirPath();
     m_profilePath = appDir + "/userdata/default";
-
-    // 配置数据放在Windows标准目录
-    // QStandardPaths::AppLocalDataLocation 返回: C:/Users/<用户名>/AppData/Local/<应用名>
-    QString appDataDir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
-    m_dataPath = appDataDir + "/data";
-    m_backupPath = appDataDir + "/backups";
+    m_dataPath = appDir + "/data";
+    m_backupPath = appDir + "/backups";
 
     qDebug() << "[INFO] Data path:" << m_dataPath;
     qDebug() << "[INFO] Backup path:" << m_backupPath;
@@ -208,10 +204,10 @@ void DataStorage::saveConfig(const QJsonObject& config) {
 }
 
 void DataStorage::migrateOldData() {
-    // 老版本数据可能存在的位置
+    // 老版本数据可能存在的位置（从 AppData / 旧硬编码路径迁到 exe/data）
     QStringList oldPaths = {
-        QCoreApplication::applicationDirPath() + "/data",  // exe目录下
-        "E:/xfollowing/data"                                // 硬编码的E盘路径
+        QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/data",
+        "E:/xfollowing/data"
     };
 
     QStringList dataFiles = {"posts.json", "keywords.json", "config.json"};
