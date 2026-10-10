@@ -13,6 +13,7 @@
 #include <QList>
 #include <QTextEdit>
 #include <QComboBox>
+#include <QLineEdit>
 #include "Data/Post.h"
 #include "Data/Keyword.h"
 
@@ -85,6 +86,7 @@ private:
     void checkNextFollowBack();   // 检查下一个用户
     void appendLog(const QString& message);  // 追加日志
     void startSleep();            // 开始休眠
+    int sleepHours() const;       // 关注失败休眠小时数（输入无效时为1）
     void injectFollowersMonitorScript();  // 注入粉丝监控脚本
     void startFollowersBrowsing();        // 开始浏览粉丝
 
@@ -112,6 +114,7 @@ private:
     QSpinBox* m_cooldownMaxSpinBox;
     QPushButton* m_autoFollowBtn;
     QSpinBox* m_unfollowDaysSpinBox;  // 取关天数设置
+    QLineEdit* m_sleepHoursEdit;      // 关注失败休眠时间（小时）
     QComboBox* m_languageComboBox;    // 目标语言（单选）
 
     // 右侧浏览器 - 用户页

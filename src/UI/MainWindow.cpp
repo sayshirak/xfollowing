@@ -11,6 +11,8 @@
 #include <QSettings>
 #include <QCoreApplication>
 #include <QFile>
+#include <QRegularExpression>
+#include <QRegularExpressionValidator>
 #include <QDebug>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -45,6 +47,7 @@ MainWindow::MainWindow(QWidget* parent)
     , m_cooldownMaxSpinBox(nullptr)
     , m_autoFollowBtn(nullptr)
     , m_unfollowDaysSpinBox(nullptr)
+    , m_sleepHoursEdit(nullptr)
     , m_languageComboBox(nullptr)
     , m_rightPanel(nullptr)
     , m_cooldownLabel(nullptr)
@@ -322,6 +325,26 @@ void MainWindow::setupUI() {
 
     centerLayout->addLayout(cooldownLayout);
 
+    // 关注失败休眠时间（小时）
+    QHBoxLayout* sleepLayout = new QHBoxLayout();
+    QLabel* sleepHoursLabel = new QLabel("关注失败休眠时间（小时）:", m_centerPanel);
+    sleepHoursLabel->setToolTip("连续关注失败3次后的休眠时长，必须是正整数");
+    m_sleepHoursEdit = new QLineEdit("1", m_centerPanel);
+    m_sleepHoursEdit->setFixedWidth(60);
+    m_sleepHoursEdit->setToolTip("连续关注失败3次后的休眠时长，必须是正整数");
+    m_sleepHoursEdit->setValidator(new QRegularExpressionValidator(
+        QRegularExpression(QStringLiteral("^[1-9]\\d{0,2}$")), m_sleepHoursEdit));
+    connect(m_sleepHoursEdit, &QLineEdit::editingFinished, this, [this]() {
+        if (!m_sleepHoursEdit->hasAcceptableInput()) {
+            m_sleepHoursEdit->setText("1");
+        }
+        saveSettings();
+    });
+    sleepLayout->addWidget(sleepHoursLabel);
+    sleepLayout->addWidget(m_sleepHoursEdit);
+    sleepLayout->addStretch();
+    centerLayout->addLayout(sleepLayout);
+
     // 更新已关注作者表格
     updateFollowedAuthorsTable();
 
@@ -487,6 +510,13 @@ void MainWindow::loadSettings() {
 
     // 取关天数设置
     m_unfollowDaysSpinBox->setValue(settings.value("unfollowDays", 2).toInt());
+
+    // 关注失败休眠时间（小时）
+    const QString sleepHours = settings.value("sleepHours", 1).toString();
+    m_sleepHoursEdit->setText(sleepHours);
+    if (!m_sleepHoursEdit->hasAcceptableInput()) {
+        m_sleepHoursEdit->setText("1");
+    }
 }
 
 void MainWindow::saveSettings() {
@@ -503,6 +533,9 @@ void MainWindow::saveSettings() {
 
     // 保存取关天数设置
     settings.setValue("unfollowDays", m_unfollowDaysSpinBox->value());
+
+    // 保存关注失败休眠时间（小时）
+    settings.setValue("sleepHours", sleepHours());
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
@@ -793,9 +826,9 @@ void MainWindow::onFollowFailed(const QString& userHandle) {
     m_statusLabel->setText(QString("状态: 关注 @%1 失败").arg(m_currentFollowingHandle));
     m_currentFollowingHandle.clear();
 
-    // 连续失败3次，进入30分钟休眠
+    // 连续失败3次，进入休眠（时长由界面配置）
     if (m_consecutiveFailures >= 3 && m_isAutoFollowing) {
-        appendLog("连续失败3次，进入30分钟休眠...");
+        appendLog(QString("连续失败3次，进入%1小时休眠...").arg(sleepHours()));
         startSleep();
         return;
     }
@@ -1122,6 +1155,15 @@ void MainWindow::onAutoFollowToggled() {
         m_autoFollowBtn->setText("自动关注");
         m_statusLabel->setText("状态: 自动关注已停止");
         qDebug() << "[INFO] Auto-follow stopped";
+
+        // 休眠中手动停止：取消休眠
+        if (m_isSleeping) {
+            m_sleepTimer->stop();
+            m_isSleeping = false;
+            m_consecutiveFailures = 0;
+            m_cooldownLabel->setVisible(false);
+            appendLog("已手动停止自动关注，休眠取消");
+        }
 
         // 恢复帖子列表和已关注列表的点击
         m_postListPanel->setEnabled(true);
@@ -1492,26 +1534,33 @@ void MainWindow::appendLog(const QString& message) {
     );
 }
 
+int MainWindow::sleepHours() const {
+    if (!m_sleepHoursEdit || !m_sleepHoursEdit->hasAcceptableInput()) {
+        return 1;
+    }
+    return m_sleepHoursEdit->text().toInt();
+}
+
 void MainWindow::startSleep() {
+    const int hours = sleepHours();
     m_isSleeping = true;
-    m_remainingSleepSeconds = 30 * 60;  // 30分钟
+    m_remainingSleepSeconds = hours * 60 * 60;
 
     // 显示休眠状态（紫色醒目提示）
     m_cooldownLabel->setStyleSheet("QLabel { background-color: #9b59b6; color: white; font-size: 18px; font-weight: bold; padding: 15px; }");
-    m_cooldownLabel->setText(QString("休眠中: %1 分钟后继续 (连续失败%2次)").arg(m_remainingSleepSeconds / 60).arg(m_consecutiveFailures));
+    m_cooldownLabel->setText(QString("休眠中: %1 小时后继续 (连续失败%2次)").arg(hours).arg(m_consecutiveFailures));
     m_cooldownLabel->setVisible(true);
 
-    m_statusLabel->setText("状态: 连续失败，休眠30分钟...");
+    m_statusLabel->setText(QString("状态: 连续失败，休眠%1小时...").arg(hours));
 
-    // 禁用相关控件
+    // 禁用列表；自动关注按钮保持可用，以便随时手动停止
     m_postListPanel->setEnabled(false);
     m_followedAuthorsTable->setEnabled(false);
-    m_autoFollowBtn->setEnabled(false);
 
     // 启动休眠计时器
     m_sleepTimer->start(1000);
 
-    qDebug() << "[INFO] Sleep started: 30 minutes";
+    qDebug() << "[INFO] Sleep started:" << hours << "hours";
 }
 
 void MainWindow::onSleepTick() {
@@ -1540,9 +1589,11 @@ void MainWindow::onSleepTick() {
         }
     } else {
         // 更新休眠显示
-        int minutes = m_remainingSleepSeconds / 60;
+        int hours = m_remainingSleepSeconds / 3600;
+        int minutes = (m_remainingSleepSeconds % 3600) / 60;
         int seconds = m_remainingSleepSeconds % 60;
-        m_cooldownLabel->setText(QString("休眠中: %1:%2 后继续 (连续失败%3次)")
+        m_cooldownLabel->setText(QString("休眠中: %1:%2:%3 后继续 (连续失败%4次)")
+            .arg(hours, 2, 10, QChar('0'))
             .arg(minutes, 2, 10, QChar('0'))
             .arg(seconds, 2, 10, QChar('0'))
             .arg(m_consecutiveFailures));

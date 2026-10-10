@@ -1,5 +1,6 @@
 # Build directories
 build/
+build_fresh/
 cmake-build-*/
 
 # IDE
@@ -60,3 +61,11 @@ desktop.ini
 *.tmp
 *.temp
 *.log
+
+# Local build tools
+tools/
+
+# Compilation output
+xfollowing/
+xfollowing-release/
+xfollowing-release.rar
