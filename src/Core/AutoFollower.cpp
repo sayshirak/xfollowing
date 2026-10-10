@@ -5,9 +5,12 @@ AutoFollower::AutoFollower(QObject* parent)
     : QObject(parent) {
 }
 
-QString AutoFollower::getFollowScript(const QString& selectedLang) {
+QString AutoFollower::getFollowScript(const QString& selectedLang, double maxFollowerRatio) {
     QString selectedJson = LanguageFilter::buildSelectedLangJson(selectedLang);
     QString detectJs = LanguageFilter::jsDetectLanguageFunction();
+    if (maxFollowerRatio <= 0.0) {
+        maxFollowerRatio = 1.5;
+    }
 
     // Custom delimiter R"JS(...)JS" avoids MSVC QStringLiteral macro paren issues
     QString script = QString::fromUtf8(R"JS(
@@ -16,6 +19,9 @@ QString AutoFollower::getFollowScript(const QString& selectedLang) {
     const userHandle = pathParts[1] || '';
     let retryCount = 0;
     const maxRetries = 2;
+    const maxFollowerRatio = )JS");
+    script += QString::number(maxFollowerRatio, 'g', 15);
+    script += QString::fromUtf8(R"JS(;
     const selectedLang = )JS");
     script += selectedJson;
     script += QString::fromUtf8(R"JS(;
@@ -46,6 +52,81 @@ QString AutoFollower::getFollowScript(const QString& selectedLang) {
         if (!ok) {
             console.log('[XFOLLOW] Language gate failed name=' + displayName + ' bioLen=' + (bio ? bio.length : 0));
             console.log('XFOLLOWING_FOLLOW_SKIP_LANG:' + userHandle);
+            return false;
+        }
+        return true;
+    }
+
+    function parseStatNumber(text) {
+        if (!text) return NaN;
+        let s = String(text).trim().replace(/,/g, '').replace(/\s+/g, '');
+        let m = s.match(/^([\d.]+)\s*万/);
+        if (m) return parseFloat(m[1]) * 10000;
+        m = s.match(/^([\d.]+)\s*亿/);
+        if (m) return parseFloat(m[1]) * 100000000;
+        m = s.match(/^([\d.]+)\s*[Kk]/);
+        if (m) return parseFloat(m[1]) * 1000;
+        m = s.match(/^([\d.]+)\s*[Mm]/);
+        if (m) return parseFloat(m[1]) * 1000000;
+        m = s.match(/([\d.]+)/);
+        if (m) return parseFloat(m[1]);
+        return NaN;
+    }
+
+    function extractCountFromLink(a) {
+        const aria = a.getAttribute('aria-label') || '';
+        let n = parseStatNumber(aria);
+        if (!isNaN(n)) return n;
+        const spans = a.querySelectorAll('span');
+        for (const span of spans) {
+            n = parseStatNumber(span.innerText || '');
+            if (!isNaN(n)) return n;
+        }
+        return parseStatNumber(a.innerText || '');
+    }
+
+    // 从主页读取粉丝数 / 正在关注数（总数，不限蓝V）
+    function getProfileCounts() {
+        let followers = NaN;
+        let following = NaN;
+        const links = document.querySelectorAll('a[href]');
+        for (const a of links) {
+            const href = (a.getAttribute('href') || '').split('?')[0];
+            if (!href) continue;
+            const isFollowing = href === '/' + userHandle + '/following' ||
+                                href.endsWith('/' + userHandle + '/following');
+            const isFollowers = href === '/' + userHandle + '/followers' ||
+                                href.endsWith('/' + userHandle + '/followers');
+            const isVerifiedFollowers = href.indexOf('/' + userHandle + '/verified_followers') >= 0;
+            if (!isFollowing && !isFollowers && !isVerifiedFollowers) continue;
+            const n = extractCountFromLink(a);
+            if (isNaN(n)) continue;
+            if (isFollowing) following = n;
+            else if (isFollowers) followers = n;
+            else if (isVerifiedFollowers && isNaN(followers)) followers = n;
+        }
+        return { followers: followers, following: following };
+    }
+
+    function checkFollowerRatioGate() {
+        const counts = getProfileCounts();
+        const followers = counts.followers;
+        const following = counts.following;
+        console.log('[XFOLLOW] Profile counts followers=' + followers + ' following=' + following + ' maxRatio=' + maxFollowerRatio);
+        if (isNaN(followers) || isNaN(following)) {
+            // 读不到数字时放行，避免因页面结构变化导致全部跳过
+            console.log('[XFOLLOW] Ratio gate skipped: counts unavailable');
+            return true;
+        }
+        if (following === 0) {
+            console.log('[XFOLLOW] Ratio gate failed: following=0');
+            console.log('XFOLLOWING_FOLLOW_SKIP_RATIO:' + userHandle + '|' + followers + '|0|inf');
+            return false;
+        }
+        const ratio = followers / following;
+        if (ratio >= maxFollowerRatio) {
+            console.log('[XFOLLOW] Ratio gate failed: ' + ratio + ' >= ' + maxFollowerRatio);
+            console.log('XFOLLOWING_FOLLOW_SKIP_RATIO:' + userHandle + '|' + followers + '|' + following + '|' + ratio.toFixed(3));
             return false;
         }
         return true;
@@ -150,6 +231,9 @@ QString AutoFollower::getFollowScript(const QString& selectedLang) {
             return;
         }
         if (!checkLanguageGate()) {
+            return;
+        }
+        if (!checkFollowerRatioGate()) {
             return;
         }
         if (checkIfUserFollowsMe()) {

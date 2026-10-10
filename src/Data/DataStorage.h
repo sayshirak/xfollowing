@@ -35,6 +35,9 @@ public:
     // 配置管理
     QJsonObject loadConfig();
     void saveConfig(const QJsonObject& config);
+    // 粉丝数/关注数 上限比值；config.json 数组项 key=
+    // "Ratio of followers to accounts followed"；缺省返回 defaultValue
+    double loadFollowerFollowingRatio(double defaultValue = 1.5);
 
     // 获取存储路径
     QString getDataPath() const { return m_dataPath; }

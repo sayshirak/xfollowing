@@ -458,6 +458,7 @@ void MainWindow::setupConnections() {
     connect(m_userBrowser, &BrowserWidget::alreadyFollowing, this, &MainWindow::onAlreadyFollowing);
     connect(m_userBrowser, &BrowserWidget::followFailed, this, &MainWindow::onFollowFailed);
     connect(m_userBrowser, &BrowserWidget::followSkippedLang, this, &MainWindow::onFollowSkippedLang);
+    connect(m_userBrowser, &BrowserWidget::followSkippedRatio, this, &MainWindow::onFollowSkippedRatio);
     connect(m_userBrowser, &BrowserWidget::exportUsersBatch, this, &MainWindow::onExportUsersBatch);
     connect(m_userBrowser, &BrowserWidget::exportUsersDone, this, &MainWindow::onExportUsersDone);
     connect(m_userBrowser, &BrowserWidget::exportUsersError, this, &MainWindow::onExportUsersError);
@@ -681,8 +682,9 @@ void MainWindow::onUserLoadFinished(bool success) {
         qDebug() << "[INFO] User page loaded, executing follow script for:" << m_currentFollowingHandle;
         m_statusLabel->setText(QString("状态: 正在关注 @%1...").arg(m_currentFollowingHandle));
 
-        // 执行自动关注脚本
-        QString script = m_autoFollower->getFollowScript(m_selectedLanguage);
+        // 执行自动关注脚本（比值每次从 config.json 读取，默认 1.5）
+        const double maxRatio = m_dataStorage->loadFollowerFollowingRatio(1.5);
+        QString script = m_autoFollower->getFollowScript(m_selectedLanguage, maxRatio);
         m_userBrowser->ExecuteJavaScript(script);
     }
 }
@@ -907,6 +909,42 @@ void MainWindow::onFollowSkippedLang(const QString& userHandle) {
     m_currentFollowingHandle.clear();
 
     // 从待关注列表移除，避免自动关注反复选中同一用户
+    for (int i = m_posts.size() - 1; i >= 0; --i) {
+        if (m_posts[i].authorHandle == userHandle) {
+            m_posts.removeAt(i);
+        }
+    }
+    m_dataStorage->savePosts(m_posts);
+    m_postListPanel->setPosts(m_posts);
+    updateStatusBar();
+
+    if (m_isAutoFollowing) {
+        QTimer::singleShot(1000, this, &MainWindow::processNextAutoFollow);
+    }
+}
+
+void MainWindow::onFollowSkippedRatio(const QString& userHandle, const QString& detail) {
+    qDebug() << "[INFO] Follow skipped by ratio:" << detail;
+
+    // detail: handle|followers|following|ratio
+    const QStringList parts = detail.split('|');
+    QString reason;
+    if (parts.size() >= 4) {
+        const QString following = parts[2];
+        if (following == "0") {
+            reason = QString("关注数为0（粉丝%1）").arg(parts[1]);
+        } else {
+            reason = QString("粉丝/关注=%1/%2=%3，超过上限")
+                         .arg(parts[1]).arg(parts[2]).arg(parts[3]);
+        }
+    } else {
+        reason = "粉丝/关注比值不符";
+    }
+
+    appendLog(QString("跳过 @%1：%2").arg(userHandle).arg(reason));
+    m_statusLabel->setText(QString("状态: @%1 比值不符，已跳过").arg(userHandle));
+    m_currentFollowingHandle.clear();
+
     for (int i = m_posts.size() - 1; i >= 0; --i) {
         if (m_posts[i].authorHandle == userHandle) {
             m_posts.removeAt(i);

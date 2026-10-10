@@ -48,6 +48,7 @@ private slots:
     void onAlreadyFollowing(const QString& userHandle);
     void onFollowFailed(const QString& userHandle);
     void onFollowSkippedLang(const QString& userHandle);
+    void onFollowSkippedRatio(const QString& userHandle, const QString& detail);
     void onAccountSuspended(const QString& userHandle);
     void onHideFollowedChanged(bool checked);
     void onKeywordsChanged();

@@ -292,6 +292,13 @@ bool CefHandler::OnConsoleMessage(CefRefPtr<CefBrowser> browser,
         writeLog("[FOLLOW_SKIP_LANG] " + userHandle);
         emit followSkippedLang(userHandle);
     }
+    // X互关宝: 粉丝/关注比值不符，跳过关注  handle|followers|following|ratio
+    else if (msg.startsWith("XFOLLOWING_FOLLOW_SKIP_RATIO:")) {
+        QString payload = msg.mid(29);
+        QString userHandle = payload.section('|', 0, 0);
+        writeLog("[FOLLOW_SKIP_RATIO] " + payload);
+        emit followSkippedRatio(userHandle, payload);
+    }
     // X互关宝: 账号被封禁
     else if (msg.startsWith("XFOLLOWING_ACCOUNT_SUSPENDED:")) {
         QString userHandle = msg.mid(29);

@@ -63,6 +63,7 @@ signals:
     void alreadyFollowing(const QString& userHandle);
     void followFailed(const QString& userHandle);
     void followSkippedLang(const QString& userHandle);
+    void followSkippedRatio(const QString& userHandle, const QString& detail);
     void accountSuspended(const QString& userHandle);
     // 回关检查信号
     void checkFollowsBack(const QString& userHandle);

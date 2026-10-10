@@ -100,6 +100,7 @@ BrowserWidget::BrowserWidget(QWidget* parent)
     connect(m_handler, &CefHandler::alreadyFollowing, this, &BrowserWidget::alreadyFollowing);
     connect(m_handler, &CefHandler::followFailed, this, &BrowserWidget::followFailed);
     connect(m_handler, &CefHandler::followSkippedLang, this, &BrowserWidget::followSkippedLang);
+    connect(m_handler, &CefHandler::followSkippedRatio, this, &BrowserWidget::followSkippedRatio);
     connect(m_handler, &CefHandler::accountSuspended, this, &BrowserWidget::accountSuspended);
     // 回关检查信号转发
     connect(m_handler, &CefHandler::checkFollowsBack, this, &BrowserWidget::checkFollowsBack);
