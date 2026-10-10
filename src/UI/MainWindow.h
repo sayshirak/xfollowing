@@ -14,6 +14,7 @@
 #include <QTextEdit>
 #include <QComboBox>
 #include <QLineEdit>
+#include <QSet>
 #include "Data/Post.h"
 #include "Data/Keyword.h"
 
@@ -65,6 +66,10 @@ private slots:
     void onUnfollowSuccess(const QString& userHandle);
     void onUnfollowFailed(const QString& userHandle);
     void onSleepTick();  // 休眠计时器
+    void onExportUsers();  // 开始/停止导出 X 上的真实关注列表
+    void onExportUsersBatch(const QString& jsonData);
+    void onExportUsersDone(int total);
+    void onExportUsersError(const QString& reason);
     // 粉丝浏览器槽函数
     void onFollowersBrowserCreated();
     void onFollowersLoadFinished(bool success);
@@ -87,6 +92,9 @@ private:
     void appendLog(const QString& message);  // 追加日志
     void startSleep();            // 开始休眠
     int sleepHours() const;       // 关注失败休眠小时数（输入无效时为1）
+    void finishExportFollowing(); // 结束导出并写 CSV（可重复调用）
+    // 每行 {authorHandle, authorName, authorUrl, bio}；成功返回绝对路径，失败返回空并写 errorOut
+    QString writeUserListCsv(const QList<QStringList>& rows, QString* errorOut);
     void injectFollowersMonitorScript();  // 注入粉丝监控脚本
     void startFollowersBrowsing();        // 开始浏览粉丝
 
@@ -115,6 +123,12 @@ private:
     QPushButton* m_autoFollowBtn;
     QSpinBox* m_unfollowDaysSpinBox;  // 取关天数设置
     QLineEdit* m_sleepHoursEdit;      // 关注失败休眠时间（小时）
+    QPushButton* m_exportUsersBtn;    // 导出关注用户
+
+    // 导出关注列表
+    bool m_isExportingFollowing;
+    QList<QStringList> m_exportRows;
+    QSet<QString> m_exportHandles;
     QComboBox* m_languageComboBox;    // 目标语言（单选）
 
     // 右侧浏览器 - 用户页

@@ -11,6 +11,11 @@
 #include <QSettings>
 #include <QCoreApplication>
 #include <QFile>
+#include <QFileInfo>
+#include <QDir>
+#include <QDate>
+#include <QTextStream>
+#include <QStringConverter>
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
 #include <QDebug>
@@ -48,6 +53,8 @@ MainWindow::MainWindow(QWidget* parent)
     , m_autoFollowBtn(nullptr)
     , m_unfollowDaysSpinBox(nullptr)
     , m_sleepHoursEdit(nullptr)
+    , m_exportUsersBtn(nullptr)
+    , m_isExportingFollowing(false)
     , m_languageComboBox(nullptr)
     , m_rightPanel(nullptr)
     , m_cooldownLabel(nullptr)
@@ -343,6 +350,26 @@ void MainWindow::setupUI() {
     sleepLayout->addWidget(sleepHoursLabel);
     sleepLayout->addWidget(m_sleepHoursEdit);
     sleepLayout->addStretch();
+
+    // 导出关注用户（红框 Data|X|GitHub 下方）
+    m_exportUsersBtn = new QPushButton("导出关注用户", m_centerPanel);
+    QPushButton* exportUsersBtn = m_exportUsersBtn;
+    exportUsersBtn->setToolTip("在右侧浏览器打开你的「正在关注」页面，滚动读取全部关注用户并导出到 exe 旁 userlist 目录");
+    exportUsersBtn->setStyleSheet(
+        "QPushButton {"
+        "  background-color: #17a2b8;"
+        "  color: white;"
+        "  border: none;"
+        "  border-radius: 3px;"
+        "  padding: 4px 12px;"
+        "}"
+        "QPushButton:hover {"
+        "  background-color: #138496;"
+        "}"
+    );
+    connect(exportUsersBtn, &QPushButton::clicked, this, &MainWindow::onExportUsers);
+    sleepLayout->addWidget(exportUsersBtn);
+
     centerLayout->addLayout(sleepLayout);
 
     // 更新已关注作者表格
@@ -422,6 +449,9 @@ void MainWindow::setupConnections() {
     connect(m_userBrowser, &BrowserWidget::alreadyFollowing, this, &MainWindow::onAlreadyFollowing);
     connect(m_userBrowser, &BrowserWidget::followFailed, this, &MainWindow::onFollowFailed);
     connect(m_userBrowser, &BrowserWidget::followSkippedLang, this, &MainWindow::onFollowSkippedLang);
+    connect(m_userBrowser, &BrowserWidget::exportUsersBatch, this, &MainWindow::onExportUsersBatch);
+    connect(m_userBrowser, &BrowserWidget::exportUsersDone, this, &MainWindow::onExportUsersDone);
+    connect(m_userBrowser, &BrowserWidget::exportUsersError, this, &MainWindow::onExportUsersError);
     connect(m_userBrowser, &BrowserWidget::accountSuspended, this, &MainWindow::onAccountSuspended);
     // 回关检查信号
     connect(m_userBrowser, &BrowserWidget::checkFollowsBack, this, &MainWindow::onCheckFollowsBack);
@@ -619,6 +649,12 @@ void MainWindow::onSearchLoadFinished(bool success) {
 
 void MainWindow::onUserLoadFinished(bool success) {
     if (!success) {
+        return;
+    }
+
+    // 导出关注列表模式
+    if (m_isExportingFollowing) {
+        m_userBrowser->ExecuteJavaScript(m_autoFollower->getExportFollowingScript());
         return;
     }
 
@@ -1539,6 +1575,145 @@ int MainWindow::sleepHours() const {
         return 1;
     }
     return m_sleepHoursEdit->text().toInt();
+}
+
+QString MainWindow::writeUserListCsv(const QList<QStringList>& rows, QString* errorOut) {
+    const QString outDir = QCoreApplication::applicationDirPath() + "/userlist";
+    if (!QDir().mkpath(outDir)) {
+        if (errorOut) *errorOut = "无法创建目录:\n" + QDir::toNativeSeparators(outDir);
+        return QString();
+    }
+
+    const QString filePath = outDir + "/" +
+        QString("userlist-%1.csv").arg(QDate::currentDate().toString("yyyy-MM-dd"));
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        if (errorOut) *errorOut = "无法写入文件:\n" + QDir::toNativeSeparators(filePath);
+        return QString();
+    }
+
+    auto csvEscape = [](QString value) {
+        value.replace('"', "\"\"");
+        return "\"" + value + "\"";
+    };
+
+    QTextStream out(&file);
+    out.setEncoding(QStringConverter::Utf8);
+    out << QChar(0xFEFF);  // BOM，方便 Excel 打开中文
+    out << "authorHandle,authorName,authorUrl,bio\n";
+    for (const QStringList& row : rows) {
+        QStringList cells;
+        for (const QString& cell : row) {
+            cells << csvEscape(cell);
+        }
+        out << cells.join(",") << "\n";
+    }
+    file.close();
+
+    return QDir::toNativeSeparators(QFileInfo(filePath).absoluteFilePath());
+}
+
+void MainWindow::onExportUsers() {
+    // 再次点击：提前结束，导出已读取到的部分
+    if (m_isExportingFollowing) {
+        appendLog("手动停止导出，正在写入已读取的用户...");
+        m_userBrowser->ExecuteJavaScript("window.xfollowingExportStop && window.xfollowingExportStop();");
+        QTimer::singleShot(3000, this, &MainWindow::finishExportFollowing);
+        return;
+    }
+
+    if (m_isAutoFollowing || m_isCooldownActive || m_isSleeping ||
+        m_isCheckingFollowBack || !m_currentFollowingHandle.isEmpty()) {
+        QMessageBox::warning(this, "暂时无法导出",
+            "导出需要使用右侧浏览器。\n请先停止自动关注，并等待冷却、休眠或回关检查结束后再导出。");
+        return;
+    }
+    if (!m_userBrowser) {
+        return;
+    }
+
+    m_isExportingFollowing = true;
+    m_exportRows.clear();
+    m_exportHandles.clear();
+    m_exportUsersBtn->setText("停止导出");
+    m_autoFollowBtn->setEnabled(false);
+    m_postListPanel->setEnabled(false);
+    m_followedAuthorsTable->setEnabled(false);
+    m_statusLabel->setText("状态: 正在打开你的关注列表...");
+    appendLog("开始导出关注用户：打开「正在关注」页面并滚动读取，用户较多时需要较长时间");
+
+    const QString homeUrl = "https://x.com/home";
+    if (!m_userBrowserInitialized) {
+        m_userBrowserInitialized = true;
+        m_hintLabel->setVisible(false);
+        m_userBrowser->setVisible(true);
+        m_userBrowser->CreateBrowserWithProfile(homeUrl, m_dataStorage->getProfilePath());
+    } else {
+        m_userBrowser->LoadUrl(homeUrl);
+    }
+}
+
+void MainWindow::onExportUsersBatch(const QString& jsonData) {
+    if (!m_isExportingFollowing) {
+        return;
+    }
+    const QJsonArray arr = QJsonDocument::fromJson(jsonData.toUtf8()).array();
+    for (const QJsonValue& v : arr) {
+        const QJsonObject obj = v.toObject();
+        const QString handle = obj["authorHandle"].toString();
+        if (handle.isEmpty() || m_exportHandles.contains(handle)) {
+            continue;
+        }
+        m_exportHandles.insert(handle);
+        m_exportRows.append({handle,
+                             obj["authorName"].toString(),
+                             obj["authorUrl"].toString(),
+                             obj["bio"].toString()});
+    }
+    m_exportUsersBtn->setText(QString("停止导出 (%1)").arg(m_exportRows.size()));
+    m_statusLabel->setText(QString("状态: 正在导出关注用户，已读取 %1 个...").arg(m_exportRows.size()));
+}
+
+void MainWindow::onExportUsersDone(int total) {
+    Q_UNUSED(total);
+    finishExportFollowing();
+}
+
+void MainWindow::onExportUsersError(const QString& reason) {
+    appendLog("导出关注用户出错: " + reason);
+    finishExportFollowing();
+}
+
+void MainWindow::finishExportFollowing() {
+    if (!m_isExportingFollowing) {
+        return;
+    }
+    m_isExportingFollowing = false;
+    m_exportUsersBtn->setText("导出关注用户");
+    m_autoFollowBtn->setEnabled(true);
+    m_postListPanel->setEnabled(true);
+    m_followedAuthorsTable->setEnabled(true);
+
+    if (m_exportRows.isEmpty()) {
+        m_statusLabel->setText("状态: 导出关注用户失败");
+        QMessageBox::warning(this, "导出失败",
+            "没有读取到任何关注用户。\n请确认右侧浏览器已登录 X，然后重试。");
+        return;
+    }
+
+    QString error;
+    const QString absPath = writeUserListCsv(m_exportRows, &error);
+    if (absPath.isEmpty()) {
+        m_statusLabel->setText("状态: 导出关注用户失败");
+        QMessageBox::warning(this, "导出失败", error);
+        return;
+    }
+
+    m_statusLabel->setText(QString("状态: 已导出 %1 个关注用户").arg(m_exportRows.size()));
+    appendLog(QString("导出关注用户成功: %1 个 -> %2").arg(m_exportRows.size()).arg(absPath));
+    QMessageBox::information(this, "导出成功",
+        QString("关注用户导出成功！\n导出到%1").arg(absPath));
 }
 
 void MainWindow::startSleep() {

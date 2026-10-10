@@ -340,6 +340,18 @@ bool CefHandler::OnConsoleMessage(CefRefPtr<CefBrowser> browser,
         writeLog("[NEW_FOLLOWERS] " + jsonData.left(500));
         emit newFollowersFound(jsonData);
     }
+    // X互关宝: 导出关注列表
+    else if (msg.startsWith("XFOLLOWING_EXPORT_BATCH:")) {
+        emit exportUsersBatch(msg.mid(24));
+    }
+    else if (msg.startsWith("XFOLLOWING_EXPORT_DONE:")) {
+        writeLog("[EXPORT_DONE] " + msg.mid(23));
+        emit exportUsersDone(msg.mid(23).toInt());
+    }
+    else if (msg.startsWith("XFOLLOWING_EXPORT_ERROR:")) {
+        writeLog("[EXPORT_ERROR] " + msg.mid(24));
+        emit exportUsersError(msg.mid(24));
+    }
     // Check if this is a JS result message
     else if (msg.startsWith("[JSRESULT]")) {
         QString result = msg.mid(10).trimmed();

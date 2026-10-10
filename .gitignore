@@ -69,3 +69,7 @@ tools/
 xfollowing/
 xfollowing-release/
 xfollowing-release.rar
+
+# Exported user lists
+userlist/
+.gitignore.bak.*

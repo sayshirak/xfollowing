@@ -111,6 +111,10 @@ BrowserWidget::BrowserWidget(QWidget* parent)
     connect(m_handler, &CefHandler::unfollowFailed, this, &BrowserWidget::unfollowFailed);
     // 粉丝采集信号转发
     connect(m_handler, &CefHandler::newFollowersFound, this, &BrowserWidget::newFollowersFound);
+    // 导出关注列表信号转发
+    connect(m_handler, &CefHandler::exportUsersBatch, this, &BrowserWidget::exportUsersBatch);
+    connect(m_handler, &CefHandler::exportUsersDone, this, &BrowserWidget::exportUsersDone);
+    connect(m_handler, &CefHandler::exportUsersError, this, &BrowserWidget::exportUsersError);
 }
 
 BrowserWidget::~BrowserWidget() {

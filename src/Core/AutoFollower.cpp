@@ -520,3 +520,111 @@ QString AutoFollower::getUnfollowScript() {
 
     return script;
 }
+
+QString AutoFollower::getExportFollowingScript() {
+    return QString::fromUtf8(R"JS(
+(function() {
+    if (window.xfollowingExport && window.xfollowingExport.running) return;
+
+    // 不在 /<handle>/following：先从左侧导航取当前登录账号，再跳转
+    if (!/^\/[A-Za-z0-9_]+\/following\/?$/.test(window.location.pathname)) {
+        let tries = 0;
+        const finder = setInterval(() => {
+            tries++;
+            const link = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]');
+            const handle = link ? (link.getAttribute('href') || '').replace(/^\//, '').split('/')[0] : '';
+            if (handle) {
+                clearInterval(finder);
+                console.log('[XFOLLOW] Export: own handle = ' + handle);
+                window.location.href = 'https://x.com/' + handle + '/following';
+            } else if (tries > 40) {
+                clearInterval(finder);
+                console.log('XFOLLOWING_EXPORT_ERROR:no_handle');
+            }
+        }, 500);
+        return;
+    }
+
+    const state = window.xfollowingExport = { running: true, seen: new Set(), idleTicks: 0, lastY: -1, lastCount: 0 };
+
+    function parseCell(cell) {
+        let handle = '';
+        let name = '';
+        for (const link of cell.querySelectorAll('a[href^="/"]')) {
+            const href = link.getAttribute('href') || '';
+            if (!/^\/[A-Za-z0-9_]+$/.test(href)) continue;
+            if (!handle) handle = href.substring(1);
+            const t = (link.innerText || '').trim();
+            if (!name && t && !t.startsWith('@')) name = t.split('\n')[0].trim();
+        }
+        if (!handle) return null;
+
+        let bio = '';
+        const desc = cell.querySelector('[data-testid="UserDescription"]');
+        if (desc && desc.innerText) {
+            bio = desc.innerText.trim();
+        } else {
+            for (const div of cell.querySelectorAll('div[dir="auto"]')) {
+                if (div.closest('a') || div.closest('[role="button"]')) continue;
+                const t = (div.innerText || '').trim();
+                const low = t.toLowerCase();
+                if (!t || t.startsWith('@') || low.includes('follows you') || t.includes('关注了你')) continue;
+                if (t.length > bio.length) bio = t;
+            }
+        }
+        return { authorHandle: handle, authorName: name || handle, authorUrl: 'https://x.com/' + handle, bio: bio };
+    }
+
+    function collect() {
+        const batch = [];
+        document.querySelectorAll('[data-testid="primaryColumn"] [data-testid="UserCell"]').forEach(cell => {
+            const user = parseCell(cell);
+            if (user && !state.seen.has(user.authorHandle)) {
+                state.seen.add(user.authorHandle);
+                batch.push(user);
+            }
+        });
+        if (batch.length) console.log('XFOLLOWING_EXPORT_BATCH:' + JSON.stringify(batch));
+    }
+
+    function clickRetry() {
+        for (const btn of document.querySelectorAll('[role="button"]')) {
+            const t = (btn.innerText || '').trim().toLowerCase();
+            if (t === 'retry' || t === '重试') { btn.click(); return; }
+        }
+    }
+
+    const observer = new MutationObserver(collect);
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    // 列表是虚拟滚动，按屏滚动而不是直接跳到底部，否则中间的用户可能不会被渲染
+    const timer = setInterval(() => {
+        collect();
+        clickRetry();
+        window.scrollBy(0, Math.floor(window.innerHeight * 0.8));
+        const y = window.scrollY;
+        if (state.seen.size === state.lastCount && Math.abs(y - state.lastY) < 2) {
+            state.idleTicks++;
+        } else {
+            state.idleTicks = 0;
+        }
+        state.lastY = y;
+        state.lastCount = state.seen.size;
+        if (state.idleTicks >= 15) finish();
+    }, 1200);
+
+    function finish() {
+        if (!state.running) return;
+        state.running = false;
+        clearInterval(timer);
+        observer.disconnect();
+        collect();
+        console.log('XFOLLOWING_EXPORT_DONE:' + state.seen.size);
+    }
+    window.xfollowingExportStop = finish;
+
+    console.log('[XFOLLOW] Export following script started');
+    setTimeout(collect, 1500);
+})();
+)JS");
+}

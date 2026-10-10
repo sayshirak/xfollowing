@@ -18,6 +18,9 @@ public:
 
     // 获取取消关注脚本
     QString getUnfollowScript();
+
+    // 获取导出关注列表脚本：定位当前账号的 /following 页面，滚动采集全部用户
+    QString getExportFollowingScript();
 };
 
 #endif // AUTOFOLLOWER_H
