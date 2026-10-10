@@ -1322,10 +1322,104 @@ void MainWindow::onAutoRefreshTimeout() {
     qDebug() << "[INFO] Next keyword switch in" << switchInterval << "seconds";
 }
 
+void MainWindow::loadUnfollowWhitelist() {
+    m_unfollowWhitelist.clear();
+
+    const QString dirPath = QCoreApplication::applicationDirPath() + "/userlist";
+    QDir dir(dirPath);
+    if (!dir.exists()) {
+        appendLog("取关白名单未启用：未找到 userlist 目录");
+        return;
+    }
+
+    static const QRegularExpression nameRe(
+        QStringLiteral("^userlist-(\\d{4}-\\d{2}-\\d{2})\\.csv$"));
+    QString bestPath;
+    QDate bestDate;
+    for (const QFileInfo& fi : dir.entryInfoList(QStringList() << "userlist-*.csv", QDir::Files)) {
+        const QRegularExpressionMatch m = nameRe.match(fi.fileName());
+        if (!m.hasMatch()) {
+            continue;
+        }
+        const QDate d = QDate::fromString(m.captured(1), QStringLiteral("yyyy-MM-dd"));
+        if (!d.isValid()) {
+            continue;
+        }
+        if (!bestDate.isValid() || d > bestDate) {
+            bestDate = d;
+            bestPath = fi.absoluteFilePath();
+        }
+    }
+
+    if (bestPath.isEmpty()) {
+        appendLog("取关白名单未启用：userlist 目录中没有 userlist-yyyy-MM-dd.csv");
+        return;
+    }
+
+    QFile file(bestPath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        appendLog("取关白名单未启用：无法读取 " + QDir::toNativeSeparators(bestPath));
+        return;
+    }
+
+    auto firstCsvField = [](const QString& line) -> QString {
+        if (line.isEmpty()) {
+            return QString();
+        }
+        if (line.at(0) == QLatin1Char('"')) {
+            QString result;
+            for (int i = 1; i < line.size(); ++i) {
+                if (line.at(i) == QLatin1Char('"')) {
+                    if (i + 1 < line.size() && line.at(i + 1) == QLatin1Char('"')) {
+                        result += QLatin1Char('"');
+                        ++i;
+                    } else {
+                        break;
+                    }
+                } else {
+                    result += line.at(i);
+                }
+            }
+            return result.trimmed();
+        }
+        return line.section(QLatin1Char(','), 0, 0).trimmed();
+    };
+
+    QTextStream in(&file);
+    in.setEncoding(QStringConverter::Utf8);
+    bool isHeader = true;
+    while (!in.atEnd()) {
+        QString line = in.readLine();
+        if (!line.isEmpty() && line.at(0) == QChar(0xFEFF)) {
+            line.remove(0, 1);
+        }
+        if (line.trimmed().isEmpty()) {
+            continue;
+        }
+        const QString handle = firstCsvField(line);
+        if (isHeader) {
+            isHeader = false;
+            if (handle.compare(QStringLiteral("authorHandle"), Qt::CaseInsensitive) == 0) {
+                continue;
+            }
+        }
+        if (handle.isEmpty()) {
+            continue;
+        }
+        m_unfollowWhitelist.insert(handle.toLower());
+    }
+    file.close();
+
+    appendLog(QString("取关白名单已加载: %1（%2 人）")
+                  .arg(QDir::toNativeSeparators(bestPath))
+                  .arg(m_unfollowWhitelist.size()));
+}
+
 void MainWindow::startFollowBackCheck() {
     if (m_isCheckingFollowBack) {
         return;  // 已经在检查中
     }
+    loadUnfollowWhitelist();
     m_isCheckingFollowBack = true;
     checkNextFollowBack();
 }
@@ -1354,6 +1448,10 @@ void MainWindow::checkNextFollowBack() {
         }
         // 跳过固定作者
         if (post.authorHandle == "4111y80y") {
+            continue;
+        }
+        // 白名单用户永不取关，也不做回关检查
+        if (m_unfollowWhitelist.contains(post.authorHandle.toLower())) {
             continue;
         }
         // 必须关注超过指定天数
@@ -1423,6 +1521,23 @@ void MainWindow::onCheckFollowsBack(const QString& userHandle) {
 
 void MainWindow::onCheckNotFollowBack(const QString& userHandle) {
     qDebug() << "[WARNING] User does NOT follow back:" << userHandle;
+
+    // 白名单兜底：即使已判定未回关也不取关
+    if (m_unfollowWhitelist.contains(userHandle.toLower())) {
+        appendLog(QString("@%1 在取关白名单中，跳过取关").arg(userHandle));
+        for (int i = 0; i < m_posts.size(); ++i) {
+            if (m_posts[i].authorHandle == userHandle) {
+                m_posts[i].lastCheckedTime = QDateTime::currentDateTime();
+            }
+        }
+        m_dataStorage->savePosts(m_posts);
+        m_cooldownLabel->setStyleSheet("QLabel { background-color: #5bc0de; color: white; font-size: 16px; font-weight: bold; padding: 10px; }");
+        m_cooldownLabel->setText(QString("@%1 白名单保护，跳过取关").arg(userHandle));
+        m_statusLabel->setText(QString("状态: @%1 白名单保护，跳过取关").arg(userHandle));
+        m_currentCheckingHandle.clear();
+        m_isCheckingFollowBack = false;
+        return;
+    }
 
     // 计算关注了多少天
     int followedDays = 0;

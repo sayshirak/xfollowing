@@ -95,6 +95,8 @@ private:
     void finishExportFollowing(); // 结束导出并写 CSV（可重复调用）
     // 每行 {authorHandle, authorName, authorUrl, bio}；成功返回绝对路径，失败返回空并写 errorOut
     QString writeUserListCsv(const QList<QStringList>& rows, QString* errorOut);
+    // 从 exe 旁 userlist/ 加载最新 userlist-yyyy-MM-dd.csv 的 authorHandle 作为取关白名单
+    void loadUnfollowWhitelist();
     void injectFollowersMonitorScript();  // 注入粉丝监控脚本
     void startFollowersBrowsing();        // 开始浏览粉丝
 
@@ -181,6 +183,7 @@ private:
     // 回关检查
     bool m_isCheckingFollowBack;       // 是否正在检查回关
     QString m_currentCheckingHandle;   // 当前正在检查的用户
+    QSet<QString> m_unfollowWhitelist; // 取关白名单（小写 handle），空表示未启用
 
     // 连续失败休眠
     int m_consecutiveFailures;         // 连续失败次数
