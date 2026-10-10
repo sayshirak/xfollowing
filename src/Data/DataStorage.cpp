@@ -116,6 +116,36 @@ void DataStorage::updateKeyword(const Keyword& keyword) {
     saveKeywords(keywords);
 }
 
+QList<Keyword> DataStorage::loadBlacklistKeywords() {
+    QList<Keyword> keywords;
+
+    QFile file(m_dataPath + "/blacklist_keywords.json");
+    if (!file.open(QIODevice::ReadOnly)) {
+        return keywords;  // 默认空
+    }
+
+    QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+    file.close();
+
+    for (const auto& v : doc.array()) {
+        keywords.append(Keyword::fromJson(v.toObject()));
+    }
+    return keywords;
+}
+
+void DataStorage::saveBlacklistKeywords(const QList<Keyword>& keywords) {
+    QJsonArray arr;
+    for (const auto& kw : keywords) {
+        arr.append(kw.toJson());
+    }
+
+    QFile file(m_dataPath + "/blacklist_keywords.json");
+    if (file.open(QIODevice::WriteOnly)) {
+        file.write(QJsonDocument(arr).toJson(QJsonDocument::Indented));
+        file.close();
+    }
+}
+
 QList<Post> DataStorage::loadPosts() {
     QList<Post> posts;
 
@@ -210,7 +240,7 @@ void DataStorage::migrateOldData() {
         "E:/xfollowing/data"
     };
 
-    QStringList dataFiles = {"posts.json", "keywords.json", "config.json"};
+    QStringList dataFiles = {"posts.json", "keywords.json", "blacklist_keywords.json", "config.json"};
 
     for (const QString& oldPath : oldPaths) {
         QDir oldDir(oldPath);
@@ -271,7 +301,7 @@ void DataStorage::createDailyBackup() {
     }
 
     // 复制当前数据文件到备份目录
-    QStringList dataFiles = {"posts.json", "keywords.json", "config.json"};
+    QStringList dataFiles = {"posts.json", "keywords.json", "blacklist_keywords.json", "config.json"};
     int copiedCount = 0;
 
     for (const QString& fileName : dataFiles) {

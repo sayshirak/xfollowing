@@ -17,8 +17,11 @@ QString PostMonitor::buildKeywordsArray(const QList<Keyword>& keywords) {
     return QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact));
 }
 
-QString PostMonitor::getMonitorScript(const QList<Keyword>& keywords, const QString& selectedLang) {
+QString PostMonitor::getMonitorScript(const QList<Keyword>& keywords,
+                                      const QString& selectedLang,
+                                      const QList<Keyword>& blacklistKeywords) {
     QString keywordsJson = buildKeywordsArray(keywords);
+    QString blacklistJson = buildKeywordsArray(blacklistKeywords);
     QString selectedJson = LanguageFilter::buildSelectedLangJson(selectedLang);
     QString detectJs = LanguageFilter::jsDetectLanguageFunction();
 
@@ -34,12 +37,26 @@ QString PostMonitor::getMonitorScript(const QList<Keyword>& keywords, const QStr
     const keywords = )JS");
     script += keywordsJson;
     script += QString::fromUtf8(R"JS(;
+    const blacklistKeywords = )JS");
+    script += blacklistJson;
+    script += QString::fromUtf8(R"JS(;
     const selectedLang = )JS");
     script += selectedJson;
     script += QString::fromUtf8(R"JS(;
 )JS");
     script += detectJs;
     script += QString::fromUtf8(R"JS(
+
+    function hitsBlacklist(name, handle) {
+        const n = (name || '').toLowerCase();
+        const h = (handle || '').toLowerCase();
+        for (const kw of blacklistKeywords) {
+            const t = (kw || '').toLowerCase();
+            if (!t) continue;
+            if (n.includes(t) || h.includes(t)) return t;
+        }
+        return null;
+    }
 
     function extractBioFromArticle(article) {
         const desc = article.querySelector('[data-testid="UserDescription"]');
@@ -75,6 +92,7 @@ QString PostMonitor::getMonitorScript(const QList<Keyword>& keywords, const QStr
             }
 
             if (!authorHandle) return null;
+            if (hitsBlacklist(authorName, authorHandle)) return null;
 
             const verifiedBadge = article.querySelector('[data-testid="icon-verified"]') ||
                                   article.querySelector('svg[aria-label="Verified account"]') ||
@@ -168,14 +186,16 @@ QString PostMonitor::getMonitorScript(const QList<Keyword>& keywords, const QStr
     window.xfollowingObserver.observe(document.body, { childList: true, subtree: true });
 
     initialScan();
-    console.log('[XFOLLOW] Monitor script injected, keywords:', keywords, 'lang:', selectedLang);
+    console.log('[XFOLLOW] Monitor script injected, keywords:', keywords, 'blacklist:', blacklistKeywords, 'lang:', selectedLang);
 })();
 )JS");
 
     return script;
 }
 
-QString PostMonitor::getFollowersMonitorScript(const QString& selectedLang) {
+QString PostMonitor::getFollowersMonitorScript(const QString& selectedLang,
+                                               const QList<Keyword>& blacklistKeywords) {
+    QString blacklistJson = buildKeywordsArray(blacklistKeywords);
     QString selectedJson = LanguageFilter::buildSelectedLangJson(selectedLang);
     QString detectJs = LanguageFilter::jsDetectLanguageFunction();
 
@@ -185,12 +205,26 @@ QString PostMonitor::getFollowersMonitorScript(const QString& selectedLang) {
         window.xfollowingFollowersProcessedIds = new Set();
     }
 
+    const blacklistKeywords = )JS");
+    script += blacklistJson;
+    script += QString::fromUtf8(R"JS(;
     const selectedLang = )JS");
     script += selectedJson;
     script += QString::fromUtf8(R"JS(;
 )JS");
     script += detectJs;
     script += QString::fromUtf8(R"JS(
+
+    function hitsBlacklist(name, handle) {
+        const n = (name || '').toLowerCase();
+        const h = (handle || '').toLowerCase();
+        for (const kw of blacklistKeywords) {
+            const t = (kw || '').toLowerCase();
+            if (!t) continue;
+            if (n.includes(t) || h.includes(t)) return t;
+        }
+        return null;
+    }
 
     function extractBioFromUserCell(userCell) {
         const desc = userCell.querySelector('[data-testid="UserDescription"]');
@@ -232,6 +266,7 @@ QString PostMonitor::getFollowersMonitorScript(const QString& selectedLang) {
             }
 
             if (!userHandle) return null;
+            if (hitsBlacklist(userName, userHandle)) return null;
 
             const verifiedBadge = userCell.querySelector('[data-testid="icon-verified"]') ||
                                   userCell.querySelector('svg[aria-label="Verified account"]') ||
@@ -297,7 +332,7 @@ QString PostMonitor::getFollowersMonitorScript(const QString& selectedLang) {
     if (window.xfollowingFollowersInterval) clearInterval(window.xfollowingFollowersInterval);
     window.xfollowingFollowersInterval = setInterval(scanFollowers, 3000);
     setTimeout(scanFollowers, 2000);
-    console.log('[XFOLLOW] Followers monitor script injected, lang:', selectedLang);
+    console.log('[XFOLLOW] Followers monitor script injected, blacklist:', blacklistKeywords, 'lang:', selectedLang);
 })();
 )JS");
 

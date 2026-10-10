@@ -51,6 +51,7 @@ private slots:
     void onAccountSuspended(const QString& userHandle);
     void onHideFollowedChanged(bool checked);
     void onKeywordsChanged();
+    void onBlacklistKeywordsChanged();
     void onLanguageChanged();
     void onCooldownTick();
     void onFollowedAuthorDoubleClicked(int row, int column);
@@ -85,6 +86,7 @@ private:
     void injectMonitorScript();
     void addPinnedAuthorPost();
     void startCooldown();
+    void cancelCooldown();  // 停止自动关注时取消冷却（含回关检查状态）
     void updateCooldownDisplay();
     void updateFollowedAuthorsTable();
     void startFollowBackCheck();  // 开始回关检查
@@ -97,6 +99,8 @@ private:
     QString writeUserListCsv(const QList<QStringList>& rows, QString* errorOut);
     // 从 exe 旁 userlist/ 加载最新 userlist-yyyy-MM-dd.csv 的 authorHandle 作为取关白名单
     void loadUnfollowWhitelist();
+    // 若名称或 ID 包含任一黑名单词，返回命中的词；否则返回空
+    QString matchBlacklistKeyword(const QString& authorName, const QString& authorHandle) const;
     void injectFollowersMonitorScript();  // 注入粉丝监控脚本
     void startFollowersBrowsing();        // 开始浏览粉丝
 
@@ -116,6 +120,7 @@ private:
     // 中间面板
     QWidget* m_centerPanel;
     KeywordPanel* m_keywordPanel;
+    KeywordPanel* m_blacklistPanel;
     QTabWidget* m_tabWidget;
     PostListPanel* m_postListPanel;
     QTableWidget* m_followedAuthorsTable;
@@ -152,6 +157,7 @@ private:
     // 数据
     QList<Post> m_posts;
     QList<Keyword> m_keywords;
+    QList<Keyword> m_blacklistKeywords;
     QString m_selectedLanguage;  // 目标语言 code
 
     // CEF timer

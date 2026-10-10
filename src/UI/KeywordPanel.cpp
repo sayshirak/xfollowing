@@ -4,16 +4,18 @@
 #include <QGroupBox>
 #include <QMessageBox>
 
-KeywordPanel::KeywordPanel(QWidget* parent)
-    : QWidget(parent) {
+KeywordPanel::KeywordPanel(const QString& title, bool protectHuguan, bool enableDoubleClick, QWidget* parent)
+    : QWidget(parent)
+    , m_title(title)
+    , m_protectHuguan(protectHuguan)
+    , m_enableDoubleClick(enableDoubleClick) {
 
     QVBoxLayout* mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(0, 0, 0, 0);
 
-    QGroupBox* groupBox = new QGroupBox("监控关键词", this);
+    QGroupBox* groupBox = new QGroupBox(m_title, this);
     QVBoxLayout* layout = new QVBoxLayout(groupBox);
 
-    // 输入区域
     QHBoxLayout* inputLayout = new QHBoxLayout();
     m_inputEdit = new QLineEdit(groupBox);
     m_inputEdit->setPlaceholderText("输入关键词...");
@@ -22,22 +24,21 @@ KeywordPanel::KeywordPanel(QWidget* parent)
     inputLayout->addWidget(m_addBtn);
     layout->addLayout(inputLayout);
 
-    // 列表
     m_listWidget = new QListWidget(groupBox);
     m_listWidget->setMaximumHeight(80);
     layout->addWidget(m_listWidget);
 
-    // 删除按钮
     m_deleteBtn = new QPushButton("删除选中", groupBox);
     layout->addWidget(m_deleteBtn);
 
     mainLayout->addWidget(groupBox);
 
-    // 连接信号
     connect(m_addBtn, &QPushButton::clicked, this, &KeywordPanel::onAddClicked);
     connect(m_deleteBtn, &QPushButton::clicked, this, &KeywordPanel::onDeleteClicked);
     connect(m_inputEdit, &QLineEdit::returnPressed, this, &KeywordPanel::onAddClicked);
-    connect(m_listWidget, &QListWidget::itemDoubleClicked, this, &KeywordPanel::onItemDoubleClicked);
+    if (m_enableDoubleClick) {
+        connect(m_listWidget, &QListWidget::itemDoubleClicked, this, &KeywordPanel::onItemDoubleClicked);
+    }
 }
 
 void KeywordPanel::setKeywords(const QList<Keyword>& keywords) {
@@ -67,9 +68,8 @@ void KeywordPanel::onAddClicked() {
         return;
     }
 
-    // 检查是否已存在
     for (const auto& kw : m_keywords) {
-        if (kw.text == text) {
+        if (kw.text.compare(text, Qt::CaseInsensitive) == 0) {
             QMessageBox::warning(this, "提示", "该关键词已存在");
             return;
         }
@@ -89,9 +89,8 @@ void KeywordPanel::onDeleteClicked() {
         return;
     }
 
-    // 默认关键词"互关"不允许删除
     QString keyword = item->text();
-    if (keyword == "互关") {
+    if (m_protectHuguan && keyword == "互关") {
         QMessageBox::warning(this, "提示", "默认关键词\"互关\"不能删除");
         return;
     }
@@ -109,7 +108,6 @@ void KeywordPanel::onDeleteClicked() {
 }
 
 void KeywordPanel::onItemDoubleClicked(QListWidgetItem* item) {
-    // 双击关键词：跳转到该关键词的Latest搜索页面
     QString keyword = item->text();
     if (!keyword.isEmpty()) {
         emit keywordDoubleClicked(keyword);

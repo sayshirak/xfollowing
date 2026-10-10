@@ -46,6 +46,7 @@ MainWindow::MainWindow(QWidget* parent)
     , m_followersBrowserInitialized(false)
     , m_centerPanel(nullptr)
     , m_keywordPanel(nullptr)
+    , m_blacklistPanel(nullptr)
     , m_postListPanel(nullptr)
     , m_hideFollowedCheckBox(nullptr)
     , m_cooldownMinSpinBox(nullptr)
@@ -108,6 +109,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     // 加载数据
     m_keywords = m_dataStorage->loadKeywords();
+    m_blacklistKeywords = m_dataStorage->loadBlacklistKeywords();
     m_posts = m_dataStorage->loadPosts();
 
     // 对加载的帖子进行去重（按作者去重）
@@ -171,10 +173,17 @@ void MainWindow::setupUI() {
     centerLayout->setContentsMargins(10, 10, 10, 10);
     centerLayout->setSpacing(10);
 
-    // 关键词设置区域
-    m_keywordPanel = new KeywordPanel(m_centerPanel);
+    // 关键词 + 黑名单关键词（左右各一半）
+    QHBoxLayout* keywordRow = new QHBoxLayout();
+    keywordRow->setSpacing(8);
+    m_keywordPanel = new KeywordPanel("关键词", true, true, m_centerPanel);
     m_keywordPanel->setKeywords(m_keywords);
-    centerLayout->addWidget(m_keywordPanel);
+    m_blacklistPanel = new KeywordPanel("黑名单关键词", false, false, m_centerPanel);
+    m_blacklistPanel->setKeywords(m_blacklistKeywords);
+    m_blacklistPanel->setToolTip("名称或 ID 包含这些词的用户不会被监控，也不会被关注");
+    keywordRow->addWidget(m_keywordPanel, 1);
+    keywordRow->addWidget(m_blacklistPanel, 1);
+    centerLayout->addLayout(keywordRow);
 
     // Tab切换区域
     m_tabWidget = new QTabWidget(m_centerPanel);
@@ -467,8 +476,9 @@ void MainWindow::setupConnections() {
     // 隐藏已关注开关
     connect(m_hideFollowedCheckBox, &QCheckBox::toggled, this, &MainWindow::onHideFollowedChanged);
 
-    // 关键词变化
+    // 关键词 / 黑名单变化
     connect(m_keywordPanel, &KeywordPanel::keywordsChanged, this, &MainWindow::onKeywordsChanged);
+    connect(m_blacklistPanel, &KeywordPanel::keywordsChanged, this, &MainWindow::onBlacklistKeywordsChanged);
 
     // 语言变化
     connect(m_languageComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -691,6 +701,13 @@ void MainWindow::onPostClicked(const Post& post) {
         return;
     }
 
+    const QString hit = matchBlacklistKeyword(post.authorName, post.authorHandle);
+    if (!hit.isEmpty()) {
+        appendLog(QString("跳过 @%1：名称/ID 含黑名单词「%2」").arg(post.authorHandle).arg(hit));
+        m_statusLabel->setText(QString("状态: @%1 命中黑名单，已跳过").arg(post.authorHandle));
+        return;
+    }
+
     m_currentFollowingHandle = post.authorHandle;
     m_statusLabel->setText(QString("状态: 正在打开 @%1 的主页...").arg(post.authorHandle));
 
@@ -759,6 +776,11 @@ void MainWindow::onNewPostsFound(const QString& jsonData) {
         post.nameLang = nameLang;
         post.bioLang = bioLang;
 
+        // 黑名单：名称或 ID 包含关键词则不入库
+        if (!matchBlacklistKeyword(post.authorName, post.authorHandle).isEmpty()) {
+            continue;
+        }
+
         // 去重：按作者去重（同一作者只保留一条帖子，因为目的是关注用户）
         bool exists = false;
         for (int i = 0; i < m_posts.size(); ++i) {
@@ -820,8 +842,10 @@ void MainWindow::onFollowSuccess(const QString& userHandle) {
     m_statusLabel->setText(QString("状态: 成功关注 @%1").arg(m_currentFollowingHandle));
     m_currentFollowingHandle.clear();
 
-    // 启动冷却
-    startCooldown();
+    // 仅自动关注模式需要冷却；手动关注成功后不进入冷却
+    if (m_isAutoFollowing) {
+        startCooldown();
+    }
 }
 
 void MainWindow::onAlreadyFollowing(const QString& userHandle) {
@@ -937,6 +961,35 @@ void MainWindow::onKeywordsChanged() {
     injectMonitorScript();
 }
 
+void MainWindow::onBlacklistKeywordsChanged() {
+    m_blacklistKeywords = m_blacklistPanel->getKeywords();
+    m_dataStorage->saveBlacklistKeywords(m_blacklistKeywords);
+
+    if (m_searchBrowserInitialized && m_searchBrowser) {
+        injectMonitorScript();
+    }
+    if (m_followersBrowserInitialized && m_followersBrowser) {
+        injectFollowersMonitorScript();
+    }
+
+    appendLog(QString("黑名单关键词已更新（%1 个）").arg(m_blacklistKeywords.size()));
+}
+
+QString MainWindow::matchBlacklistKeyword(const QString& authorName, const QString& authorHandle) const {
+    const QString name = authorName.toLower();
+    const QString handle = authorHandle.toLower();
+    for (const Keyword& kw : m_blacklistKeywords) {
+        if (!kw.isEnabled || kw.text.isEmpty()) {
+            continue;
+        }
+        const QString t = kw.text.toLower();
+        if (name.contains(t) || handle.contains(t)) {
+            return kw.text;
+        }
+    }
+    return QString();
+}
+
 void MainWindow::onLanguageChanged() {
     m_selectedLanguage = m_languageComboBox->currentData().toString();
     saveSettings();
@@ -973,9 +1026,10 @@ void MainWindow::injectMonitorScript() {
     if (!m_searchBrowser) {
         return;
     }
-    QString script = m_postMonitor->getMonitorScript(m_keywords, m_selectedLanguage);
+    QString script = m_postMonitor->getMonitorScript(m_keywords, m_selectedLanguage, m_blacklistKeywords);
     m_searchBrowser->ExecuteJavaScript(script);
-    qDebug() << "[INFO] Monitor script injected, lang:" << m_selectedLanguage;
+    qDebug() << "[INFO] Monitor script injected, lang:" << m_selectedLanguage
+             << "blacklist:" << m_blacklistKeywords.size();
 }
 
 void MainWindow::addPinnedAuthorPost() {
@@ -1030,6 +1084,9 @@ void MainWindow::startCooldown() {
     // 禁用帖子列表点击
     m_postListPanel->setEnabled(false);
 
+    // 恢复冷却条默认样式（回关检查可能改过颜色）
+    m_cooldownLabel->setStyleSheet("QLabel { background-color: #ff6b6b; color: white; font-size: 16px; font-weight: bold; padding: 10px; }");
+
     // 显示倒计时
     updateCooldownDisplay();
     m_cooldownLabel->setVisible(true);
@@ -1041,6 +1098,21 @@ void MainWindow::startCooldown() {
     QTimer::singleShot(3000, this, &MainWindow::startFollowBackCheck);
 
     qDebug() << "[INFO] Cooldown started:" << randomCooldown << "seconds (range:" << m_cooldownMinSeconds << "-" << m_cooldownMaxSeconds << ")";
+}
+
+void MainWindow::cancelCooldown() {
+    if (!m_isCooldownActive && !m_isCheckingFollowBack) {
+        return;
+    }
+    m_cooldownTimer->stop();
+    m_isCooldownActive = false;
+    m_remainingCooldown = 0;
+    m_isCheckingFollowBack = false;
+    m_currentCheckingHandle.clear();
+    m_cooldownLabel->setVisible(false);
+    m_cooldownLabel->setStyleSheet("QLabel { background-color: #ff6b6b; color: white; font-size: 16px; font-weight: bold; padding: 10px; }");
+    m_postListPanel->setEnabled(true);
+    qDebug() << "[INFO] Cooldown cancelled";
 }
 
 void MainWindow::onCooldownTick() {
@@ -1165,13 +1237,6 @@ void MainWindow::onKeywordDoubleClicked(const QString& keyword) {
 }
 
 void MainWindow::onAutoFollowToggled() {
-    // 如果正在冷却中，不允许启动自动关注
-    if (m_isCooldownActive && m_autoFollowBtn->isChecked()) {
-        m_autoFollowBtn->setChecked(false);
-        m_statusLabel->setText("状态: 冷却中，请等待冷却结束后再启动自动关注");
-        return;
-    }
-
     m_isAutoFollowing = m_autoFollowBtn->isChecked();
 
     if (m_isAutoFollowing) {
@@ -1191,6 +1256,12 @@ void MainWindow::onAutoFollowToggled() {
         m_autoFollowBtn->setText("自动关注");
         m_statusLabel->setText("状态: 自动关注已停止");
         qDebug() << "[INFO] Auto-follow stopped";
+
+        // 停止时取消冷却（不关注就不该有冷却）
+        if (m_isCooldownActive || m_isCheckingFollowBack) {
+            cancelCooldown();
+            appendLog("已手动停止自动关注，冷却取消");
+        }
 
         // 休眠中手动停止：取消休眠
         if (m_isSleeping) {
@@ -1239,13 +1310,26 @@ void MainWindow::processNextAutoFollow() {
     }
 
     // 然后查找其他未关注的帖子
-    for (const auto& post : m_posts) {
+    for (int i = 0; i < m_posts.size(); ++i) {
+        const Post& post = m_posts[i];
         // 跳过固定帖子（已在上面处理）
         if (post.authorHandle == pinnedAuthorHandle) {
             continue;
         }
         // 跳过已关注的
         if (post.isFollowed) {
+            continue;
+        }
+
+        // 黑名单：移除并继续下一个
+        const QString hit = matchBlacklistKeyword(post.authorName, post.authorHandle);
+        if (!hit.isEmpty()) {
+            appendLog(QString("跳过 @%1：名称/ID 含黑名单词「%2」").arg(post.authorHandle).arg(hit));
+            m_posts.removeAt(i);
+            --i;
+            m_dataStorage->savePosts(m_posts);
+            m_postListPanel->setPosts(m_posts);
+            updateStatusBar();
             continue;
         }
 
@@ -1913,9 +1997,10 @@ void MainWindow::injectFollowersMonitorScript() {
     if (!m_followersBrowser) {
         return;
     }
-    QString script = m_postMonitor->getFollowersMonitorScript(m_selectedLanguage);
+    QString script = m_postMonitor->getFollowersMonitorScript(m_selectedLanguage, m_blacklistKeywords);
     m_followersBrowser->ExecuteJavaScript(script);
-    qDebug() << "[INFO] Followers monitor script injected, lang:" << m_selectedLanguage;
+    qDebug() << "[INFO] Followers monitor script injected, lang:" << m_selectedLanguage
+             << "blacklist:" << m_blacklistKeywords.size();
 }
 
 void MainWindow::startFollowersBrowsing() {
@@ -2025,6 +2110,10 @@ void MainWindow::onNewFollowersFound(const QString& jsonData) {
             }
             post.nameLang = nameLang;
             post.bioLang = bioLang;
+
+            if (!matchBlacklistKeyword(post.authorName, post.authorHandle).isEmpty()) {
+                continue;
+            }
 
             m_posts.append(post);
             m_dataStorage->addPost(post);

@@ -12,7 +12,11 @@ class KeywordPanel : public QWidget {
     Q_OBJECT
 
 public:
-    explicit KeywordPanel(QWidget* parent = nullptr);
+    // protectHuguan: 禁止删除默认「互关」；enableDoubleClick: 双击跳转搜索
+    explicit KeywordPanel(const QString& title = QStringLiteral("关键词"),
+                          bool protectHuguan = false,
+                          bool enableDoubleClick = false,
+                          QWidget* parent = nullptr);
 
     void setKeywords(const QList<Keyword>& keywords);
     QList<Keyword> getKeywords() const;
@@ -28,6 +32,10 @@ private slots:
 
 private:
     void updateList();
+
+    QString m_title;
+    bool m_protectHuguan;
+    bool m_enableDoubleClick;
 
     QLineEdit* m_inputEdit;
     QPushButton* m_addBtn;
