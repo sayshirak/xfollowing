@@ -173,61 +173,7 @@ void MainWindow::setupUI() {
     centerLayout->setContentsMargins(10, 10, 10, 10);
     centerLayout->setSpacing(10);
 
-    // 关键词 + 黑名单关键词（左右各一半）
-    QHBoxLayout* keywordRow = new QHBoxLayout();
-    keywordRow->setSpacing(8);
-    m_keywordPanel = new KeywordPanel("关键词", true, true, m_centerPanel);
-    m_keywordPanel->setKeywords(m_keywords);
-    m_blacklistPanel = new KeywordPanel("黑名单关键词", false, false, m_centerPanel);
-    m_blacklistPanel->setKeywords(m_blacklistKeywords);
-    m_blacklistPanel->setToolTip("名称或 ID 包含这些词的用户不会被监控，也不会被关注");
-    keywordRow->addWidget(m_keywordPanel, 1);
-    keywordRow->addWidget(m_blacklistPanel, 1);
-    centerLayout->addLayout(keywordRow);
-
-    // Tab切换区域
-    m_tabWidget = new QTabWidget(m_centerPanel);
-
-    // Tab1: 帖子列表
-    QWidget* postTab = new QWidget();
-    QVBoxLayout* postLayout = new QVBoxLayout(postTab);
-    postLayout->setContentsMargins(0, 0, 0, 0);
-
-    m_postListPanel = new PostListPanel(postTab);
-    m_postListPanel->setPosts(m_posts);
-    postLayout->addWidget(m_postListPanel);
-
-    // 隐藏已关注开关
-    m_hideFollowedCheckBox = new QCheckBox("隐藏已关注的帖子", postTab);
-    postLayout->addWidget(m_hideFollowedCheckBox);
-
-    m_tabWidget->addTab(postTab, "监控帖子");
-
-    // Tab2: 已关注作者列表
-    QWidget* followedTab = new QWidget();
-    QVBoxLayout* followedLayout = new QVBoxLayout(followedTab);
-    followedLayout->setContentsMargins(0, 0, 0, 0);
-
-    m_followedAuthorsTable = new QTableWidget(followedTab);
-    m_followedAuthorsTable->setColumnCount(3);
-    m_followedAuthorsTable->setHorizontalHeaderLabels({"作者", "关注时间", "来源帖子"});
-    m_followedAuthorsTable->horizontalHeader()->setStretchLastSection(true);
-    m_followedAuthorsTable->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_followedAuthorsTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    m_followedAuthorsTable->setAlternatingRowColors(true);
-    m_followedAuthorsTable->setColumnWidth(0, 120);
-    m_followedAuthorsTable->setColumnWidth(1, 100);
-    followedLayout->addWidget(m_followedAuthorsTable);
-
-    QLabel* hintLabel = new QLabel("双击作者可打开其主页(不自动关注)", followedTab);
-    hintLabel->setStyleSheet("color: gray; font-size: 11px;");
-    followedLayout->addWidget(hintLabel);
-
-    m_tabWidget->addTab(followedTab, "已关注");
-
-    centerLayout->addWidget(m_tabWidget, 1);
-
-    // 冷却时间设置（随机范围）
+    // 冷却时间设置（随机范围）——放在关键词上方，方便操作
     QHBoxLayout* cooldownLayout = new QHBoxLayout();
     QLabel* cooldownSettingLabel = new QLabel("关注冷却(秒):", m_centerPanel);
     m_cooldownMinSpinBox = new QSpinBox(m_centerPanel);
@@ -380,6 +326,60 @@ void MainWindow::setupUI() {
     sleepLayout->addWidget(exportUsersBtn);
 
     centerLayout->addLayout(sleepLayout);
+
+    // 关键词 + 黑名单关键词（左右各一半）
+    QHBoxLayout* keywordRow = new QHBoxLayout();
+    keywordRow->setSpacing(8);
+    m_keywordPanel = new KeywordPanel("关键词", true, true, m_centerPanel);
+    m_keywordPanel->setKeywords(m_keywords);
+    m_blacklistPanel = new KeywordPanel("黑名单关键词", false, false, m_centerPanel);
+    m_blacklistPanel->setKeywords(m_blacklistKeywords);
+    m_blacklistPanel->setToolTip("名称或 ID 包含这些词的用户不会被监控，也不会被关注");
+    keywordRow->addWidget(m_keywordPanel, 1);
+    keywordRow->addWidget(m_blacklistPanel, 1);
+    centerLayout->addLayout(keywordRow);
+
+    // Tab切换区域
+    m_tabWidget = new QTabWidget(m_centerPanel);
+
+    // Tab1: 帖子列表
+    QWidget* postTab = new QWidget();
+    QVBoxLayout* postLayout = new QVBoxLayout(postTab);
+    postLayout->setContentsMargins(0, 0, 0, 0);
+
+    m_postListPanel = new PostListPanel(postTab);
+    m_postListPanel->setPosts(m_posts);
+    postLayout->addWidget(m_postListPanel);
+
+    // 隐藏已关注开关
+    m_hideFollowedCheckBox = new QCheckBox("隐藏已关注的帖子", postTab);
+    postLayout->addWidget(m_hideFollowedCheckBox);
+
+    m_tabWidget->addTab(postTab, "监控帖子");
+
+    // Tab2: 已关注作者列表
+    QWidget* followedTab = new QWidget();
+    QVBoxLayout* followedLayout = new QVBoxLayout(followedTab);
+    followedLayout->setContentsMargins(0, 0, 0, 0);
+
+    m_followedAuthorsTable = new QTableWidget(followedTab);
+    m_followedAuthorsTable->setColumnCount(3);
+    m_followedAuthorsTable->setHorizontalHeaderLabels({"作者", "关注时间", "来源帖子"});
+    m_followedAuthorsTable->horizontalHeader()->setStretchLastSection(true);
+    m_followedAuthorsTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_followedAuthorsTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_followedAuthorsTable->setAlternatingRowColors(true);
+    m_followedAuthorsTable->setColumnWidth(0, 120);
+    m_followedAuthorsTable->setColumnWidth(1, 100);
+    followedLayout->addWidget(m_followedAuthorsTable);
+
+    QLabel* hintLabel = new QLabel("双击作者可打开其主页(不自动关注)", followedTab);
+    hintLabel->setStyleSheet("color: gray; font-size: 11px;");
+    followedLayout->addWidget(hintLabel);
+
+    m_tabWidget->addTab(followedTab, "已关注");
+
+    centerLayout->addWidget(m_tabWidget, 1);
 
     // 更新已关注作者表格
     updateFollowedAuthorsTable();
