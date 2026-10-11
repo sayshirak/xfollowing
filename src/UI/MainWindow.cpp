@@ -26,6 +26,7 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QHash>
 #include <QStatusBar>
 #include <QSet>
 #include <QHeaderView>
@@ -537,6 +538,40 @@ void MainWindow::loadSettings() {
         }
     }
 
+    // 旧版 data/config.json 的比值迁移到 settings.ini 的 followerRatio，然后删除 config.json
+    const QString legacyConfigPath = QCoreApplication::applicationDirPath() + "/data/config.json";
+    if (!settings.contains("followerRatio") && QFile::exists(legacyConfigPath)) {
+        QFile file(legacyConfigPath);
+        if (file.open(QIODevice::ReadOnly)) {
+            const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+            file.close();
+            double migrated = 1.5;
+            static const QString kOldKey =
+                QStringLiteral("Ratio of followers to accounts followed");
+            if (doc.isArray()) {
+                for (const QJsonValue& item : doc.array()) {
+                    const QJsonObject obj = item.toObject();
+                    if (obj.value("key").toString() == kOldKey) {
+                        migrated = obj.value("value").toDouble(1.5);
+                        break;
+                    }
+                }
+            } else if (doc.isObject() && doc.object().contains(kOldKey)) {
+                migrated = doc.object().value(kOldKey).toDouble(1.5);
+            }
+            if (migrated <= 0.0) {
+                migrated = 1.5;
+            }
+            settings.setValue("followerRatio", migrated);
+            settings.sync();
+            qDebug() << "[INFO] Migrated followerRatio from config.json:" << migrated;
+        }
+    }
+    if (QFile::exists(legacyConfigPath)) {
+        QFile::remove(legacyConfigPath);
+        qDebug() << "[INFO] Removed legacy config.json";
+    }
+
     restoreGeometry(settings.value("geometry").toByteArray());
     restoreState(settings.value("windowState").toByteArray());
 
@@ -579,16 +614,26 @@ void MainWindow::loadSettings() {
         m_sleepHoursEdit->setText("1");
     }
 
+    // 粉丝/关注比值：缺省写入 1.5
+    if (!settings.contains("followerRatio")) {
+        settings.setValue("followerRatio", 1.5);
+        settings.sync();
+    }
+
     // 当日统计：日期不一致则归零
     m_todayDate = QDate::fromString(settings.value("todayDate").toString(), Qt::ISODate);
     m_todayFollowCount = settings.value("todayFollowCount", 0).toInt();
     m_todayUnfollowCount = settings.value("todayUnfollowCount", 0).toInt();
     ensureTodayDailyStats(true);
     updateDailyStatsLabels();
+
+    // 写回一次，确保 ini 含 followerRatio 与中文注释
+    saveSettings();
 }
 
 void MainWindow::saveSettings() {
-    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+    const QString iniPath = QCoreApplication::applicationDirPath() + "/settings.ini";
+    QSettings settings(iniPath, QSettings::IniFormat);
     settings.setValue("geometry", saveGeometry());
     settings.setValue("windowState", saveState());
     settings.setValue("splitterSizes", m_mainSplitter->saveState());
@@ -605,10 +650,92 @@ void MainWindow::saveSettings() {
     // 保存关注失败休眠时间（小时）
     settings.setValue("sleepHours", sleepHours());
 
+    // 粉丝数/关注数上限比值（保留用户手工改过的值）
+    settings.setValue("followerRatio", followerRatio());
+
     // 当日关注 / 取关统计
     settings.setValue("todayDate", m_todayDate.toString(Qt::ISODate));
     settings.setValue("todayFollowCount", m_todayFollowCount);
     settings.setValue("todayUnfollowCount", m_todayUnfollowCount);
+
+    settings.sync();
+    annotateSettingsIniComments();
+}
+
+double MainWindow::followerRatio() const {
+    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+    const double d = settings.value("followerRatio", 1.5).toDouble();
+    return (d > 0.0) ? d : 1.5;
+}
+
+void MainWindow::annotateSettingsIniComments() const {
+    const QString path = QCoreApplication::applicationDirPath() + "/settings.ini";
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return;
+    }
+    const QString content = QString::fromUtf8(file.readAll());
+    file.close();
+
+    static const QHash<QString, QString> comments = {
+        {QStringLiteral("geometry"),
+         QStringLiteral("窗口位置与大小（程序自动保存，一般无需手工改）")},
+        {QStringLiteral("windowState"),
+         QStringLiteral("窗口最大化等状态（程序自动保存）")},
+        {QStringLiteral("splitterSizes"),
+         QStringLiteral("三栏分割条位置（程序自动保存）")},
+        {QStringLiteral("hideFollowed"),
+         QStringLiteral("是否隐藏已关注的帖子（true/false）")},
+        {QStringLiteral("selectedLanguage"),
+         QStringLiteral("目标语言代码：zh=中文 en=英语 ja=日语 ko=韩语 other=其他")},
+        {QStringLiteral("cooldownMin"),
+         QStringLiteral("关注冷却最小秒数")},
+        {QStringLiteral("cooldownMax"),
+         QStringLiteral("关注冷却最大秒数")},
+        {QStringLiteral("unfollowDays"),
+         QStringLiteral("未回关取关天数：关注超过此天数且未回关则取消关注")},
+        {QStringLiteral("sleepHours"),
+         QStringLiteral("连续关注失败3次后的休眠小时数（正整数）")},
+        {QStringLiteral("followerRatio"),
+         QStringLiteral("粉丝数/关注数上限比值：大于等于此值则跳过关注（默认1.5）")},
+        {QStringLiteral("todayDate"),
+         QStringLiteral("当日统计所属日期（yyyy-MM-dd，跨日归零）")},
+        {QStringLiteral("todayFollowCount"),
+         QStringLiteral("当日关注成功次数")},
+        {QStringLiteral("todayUnfollowCount"),
+         QStringLiteral("当日取关成功次数")},
+    };
+
+    QStringList out;
+    out << QStringLiteral("; X互关宝配置文件 settings.ini");
+    out << QStringLiteral("; 分号开头的行为中文说明；业务项可手工修改");
+    out << QString();
+
+    const QStringList lines = content.split(QRegularExpression(QStringLiteral("[\\r\\n]+")),
+                                            Qt::SkipEmptyParts);
+    for (QString line : lines) {
+        line = line.trimmed();
+        if (line.isEmpty() || line.startsWith(QLatin1Char(';')) || line.startsWith(QLatin1Char('#'))) {
+            continue;
+        }
+        if (line.startsWith(QLatin1Char('['))) {
+            out << line;
+            out << QString();
+            continue;
+        }
+        const QString key = line.section(QLatin1Char('='), 0, 0).trimmed();
+        if (comments.contains(key)) {
+            out << QStringLiteral("; ") + comments.value(key);
+        }
+        out << line;
+    }
+    out << QString();
+
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+        return;
+    }
+    file.write(out.join(QStringLiteral("\n")).toUtf8());
+    file.close();
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
@@ -714,9 +841,8 @@ void MainWindow::onUserLoadFinished(bool success) {
         qDebug() << "[INFO] User page loaded, executing follow script for:" << m_currentFollowingHandle;
         m_statusLabel->setText(QString("状态: 正在关注 @%1...").arg(m_currentFollowingHandle));
 
-        // 执行自动关注脚本（比值每次从 config.json 读取，默认 1.5）
-        const double maxRatio = m_dataStorage->loadFollowerFollowingRatio(1.5);
-        QString script = m_autoFollower->getFollowScript(m_selectedLanguage, maxRatio);
+        // 执行自动关注脚本（比值每次从 settings.ini 的 followerRatio 读取，默认 1.5）
+        QString script = m_autoFollower->getFollowScript(m_selectedLanguage, followerRatio());
         m_userBrowser->ExecuteJavaScript(script);
     }
 }
@@ -1103,10 +1229,8 @@ void MainWindow::ensureTodayDailyStats(bool persist) {
     m_todayFollowCount = 0;
     m_todayUnfollowCount = 0;
     if (persist) {
-        QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
-        settings.setValue("todayDate", m_todayDate.toString(Qt::ISODate));
-        settings.setValue("todayFollowCount", 0);
-        settings.setValue("todayUnfollowCount", 0);
+        // 完整写回以保留 followerRatio 等项与中文注释
+        saveSettings();
     }
 }
 
@@ -1114,20 +1238,14 @@ void MainWindow::bumpTodayFollowCount() {
     ensureTodayDailyStats(false);
     ++m_todayFollowCount;
     updateDailyStatsLabels();
-    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
-    settings.setValue("todayDate", m_todayDate.toString(Qt::ISODate));
-    settings.setValue("todayFollowCount", m_todayFollowCount);
-    settings.setValue("todayUnfollowCount", m_todayUnfollowCount);
+    saveSettings();
 }
 
 void MainWindow::bumpTodayUnfollowCount() {
     ensureTodayDailyStats(false);
     ++m_todayUnfollowCount;
     updateDailyStatsLabels();
-    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
-    settings.setValue("todayDate", m_todayDate.toString(Qt::ISODate));
-    settings.setValue("todayFollowCount", m_todayFollowCount);
-    settings.setValue("todayUnfollowCount", m_todayUnfollowCount);
+    saveSettings();
 }
 
 void MainWindow::updateDailyStatsLabels() {

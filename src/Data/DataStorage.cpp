@@ -213,74 +213,6 @@ bool DataStorage::postExists(const QString& postId) {
     return false;
 }
 
-QJsonObject DataStorage::loadConfig() {
-    QFile file(m_dataPath + "/config.json");
-    if (!file.open(QIODevice::ReadOnly)) {
-        return QJsonObject();
-    }
-
-    QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
-    file.close();
-
-    return doc.object();
-}
-
-void DataStorage::saveConfig(const QJsonObject& config) {
-    QFile file(m_dataPath + "/config.json");
-    if (file.open(QIODevice::WriteOnly)) {
-        file.write(QJsonDocument(config).toJson(QJsonDocument::Indented));
-        file.close();
-    }
-}
-
-double DataStorage::loadFollowerFollowingRatio(double defaultValue) {
-    static const QString kKey =
-        QStringLiteral("Ratio of followers to accounts followed");
-
-    QFile file(m_dataPath + "/config.json");
-    if (!file.open(QIODevice::ReadOnly)) {
-        return defaultValue;
-    }
-
-    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
-    file.close();
-
-    auto readValue = [&](const QJsonValue& v) -> double {
-        if (v.isDouble()) {
-            return v.toDouble(defaultValue);
-        }
-        if (v.isString()) {
-            bool ok = false;
-            const double d = v.toString().toDouble(&ok);
-            return ok ? d : defaultValue;
-        }
-        return defaultValue;
-    };
-
-    // 支持数组格式: [{"key":"...","value":1.5}]
-    if (doc.isArray()) {
-        for (const QJsonValue& item : doc.array()) {
-            const QJsonObject obj = item.toObject();
-            if (obj.value("key").toString() == kKey) {
-                const double d = readValue(obj.value("value"));
-                return (d > 0.0) ? d : defaultValue;
-            }
-        }
-        return defaultValue;
-    }
-
-    // 兼容对象格式: {"Ratio of followers to accounts followed": 1.5}
-    if (doc.isObject()) {
-        const QJsonObject obj = doc.object();
-        if (obj.contains(kKey)) {
-            const double d = readValue(obj.value(kKey));
-            return (d > 0.0) ? d : defaultValue;
-        }
-    }
-
-    return defaultValue;
-}
-
 void DataStorage::migrateOldData() {
     // 老版本数据可能存在的位置（从 AppData / 旧硬编码路径迁到 exe/data）
     QStringList oldPaths = {
@@ -288,7 +220,7 @@ void DataStorage::migrateOldData() {
         "E:/xfollowing/data"
     };
 
-    QStringList dataFiles = {"posts.json", "keywords.json", "blacklist_keywords.json", "config.json"};
+    QStringList dataFiles = {"posts.json", "keywords.json", "blacklist_keywords.json"};
 
     for (const QString& oldPath : oldPaths) {
         QDir oldDir(oldPath);
@@ -349,7 +281,7 @@ void DataStorage::createDailyBackup() {
     }
 
     // 复制当前数据文件到备份目录
-    QStringList dataFiles = {"posts.json", "keywords.json", "blacklist_keywords.json", "config.json"};
+    QStringList dataFiles = {"posts.json", "keywords.json", "blacklist_keywords.json"};
     int copiedCount = 0;
 
     for (const QString& fileName : dataFiles) {

@@ -84,6 +84,10 @@ private:
     void setupConnections();
     void loadSettings();
     void saveSettings();
+    // 为 settings.ini 各字段写入中文说明（分号注释）
+    void annotateSettingsIniComments() const;
+    // 粉丝/关注数比值上限，从 settings.ini 的 followerRatio 读取，默认 1.5
+    double followerRatio() const;
     void updateStatusBar();
     void injectMonitorScript();
     void addPinnedAuthorPost();
