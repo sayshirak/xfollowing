@@ -15,6 +15,7 @@
 #include <QComboBox>
 #include <QLineEdit>
 #include <QSet>
+#include <QDate>
 #include "Data/Post.h"
 #include "Data/Keyword.h"
 
@@ -102,6 +103,11 @@ private:
     void loadUnfollowWhitelist();
     // 若名称或 ID 包含任一黑名单词，返回命中的词；否则返回空
     QString matchBlacklistKeyword(const QString& authorName, const QString& authorHandle) const;
+    // 若本地日期与 todayDate 不同则归零；persist=true 时写回 settings.ini
+    void ensureTodayDailyStats(bool persist = true);
+    void bumpTodayFollowCount();
+    void bumpTodayUnfollowCount();
+    void updateDailyStatsLabels();
     void injectFollowersMonitorScript();  // 注入粉丝监控脚本
     void startFollowersBrowsing();        // 开始浏览粉丝
 
@@ -120,6 +126,8 @@ private:
 
     // 中间面板
     QWidget* m_centerPanel;
+    QLabel* m_todayFollowLabel;       // 当日关注总数
+    QLabel* m_todayUnfollowLabel;     // 当日取关总数
     KeywordPanel* m_keywordPanel;
     KeywordPanel* m_blacklistPanel;
     QTabWidget* m_tabWidget;
@@ -197,6 +205,11 @@ private:
     bool m_isSleeping;                 // 是否在休眠
     int m_remainingSleepSeconds;       // 剩余休眠秒数
     QTimer* m_sleepTimer;              // 休眠计时器
+
+    // 当日关注 / 取关统计（本机本地日期，跨日在启动或下次操作时归零）
+    QDate m_todayDate;
+    int m_todayFollowCount;
+    int m_todayUnfollowCount;
 };
 
 #endif // MAINWINDOW_H

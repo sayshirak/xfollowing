@@ -45,6 +45,8 @@ MainWindow::MainWindow(QWidget* parent)
     , m_followersBrowser(nullptr)
     , m_followersBrowserInitialized(false)
     , m_centerPanel(nullptr)
+    , m_todayFollowLabel(nullptr)
+    , m_todayUnfollowLabel(nullptr)
     , m_keywordPanel(nullptr)
     , m_blacklistPanel(nullptr)
     , m_postListPanel(nullptr)
@@ -83,6 +85,9 @@ MainWindow::MainWindow(QWidget* parent)
     , m_isSleeping(false)
     , m_remainingSleepSeconds(0)
     , m_sleepTimer(nullptr)
+    , m_todayDate(QDate::currentDate())
+    , m_todayFollowCount(0)
+    , m_todayUnfollowCount(0)
     , m_selectedLanguage(LanguageFilter::defaultLanguage()) {
 
     setWindowTitle("X互关宝 - X.com互关粉丝助手");
@@ -172,6 +177,21 @@ void MainWindow::setupUI() {
     QVBoxLayout* centerLayout = new QVBoxLayout(m_centerPanel);
     centerLayout->setContentsMargins(10, 10, 10, 10);
     centerLayout->setSpacing(10);
+
+    // 当日关注 / 取关总数（比下面控件标签大约一号）
+    QHBoxLayout* dailyStatsLayout = new QHBoxLayout();
+    m_todayFollowLabel = new QLabel(m_centerPanel);
+    m_todayUnfollowLabel = new QLabel(m_centerPanel);
+    const QString dailyStatsStyle =
+        "QLabel { font-size: 13px; font-weight: bold; color: #222; }";
+    m_todayFollowLabel->setStyleSheet(dailyStatsStyle);
+    m_todayUnfollowLabel->setStyleSheet(dailyStatsStyle);
+    dailyStatsLayout->addWidget(m_todayFollowLabel);
+    dailyStatsLayout->addSpacing(24);
+    dailyStatsLayout->addWidget(m_todayUnfollowLabel);
+    dailyStatsLayout->addStretch();
+    centerLayout->addLayout(dailyStatsLayout);
+    updateDailyStatsLabels();
 
     // 冷却时间设置（随机范围）——放在关键词上方，方便操作
     QHBoxLayout* cooldownLayout = new QHBoxLayout();
@@ -558,6 +578,13 @@ void MainWindow::loadSettings() {
     if (!m_sleepHoursEdit->hasAcceptableInput()) {
         m_sleepHoursEdit->setText("1");
     }
+
+    // 当日统计：日期不一致则归零
+    m_todayDate = QDate::fromString(settings.value("todayDate").toString(), Qt::ISODate);
+    m_todayFollowCount = settings.value("todayFollowCount", 0).toInt();
+    m_todayUnfollowCount = settings.value("todayUnfollowCount", 0).toInt();
+    ensureTodayDailyStats(true);
+    updateDailyStatsLabels();
 }
 
 void MainWindow::saveSettings() {
@@ -577,6 +604,11 @@ void MainWindow::saveSettings() {
 
     // 保存关注失败休眠时间（小时）
     settings.setValue("sleepHours", sleepHours());
+
+    // 当日关注 / 取关统计
+    settings.setValue("todayDate", m_todayDate.toString(Qt::ISODate));
+    settings.setValue("todayFollowCount", m_todayFollowCount);
+    settings.setValue("todayUnfollowCount", m_todayUnfollowCount);
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
@@ -828,6 +860,8 @@ void MainWindow::onFollowSuccess(const QString& userHandle) {
     // 记录日志
     appendLog(QString("关注 @%1 成功").arg(m_currentFollowingHandle));
 
+    bumpTodayFollowCount();
+
     // 更新帖子状态
     for (int i = 0; i < m_posts.size(); ++i) {
         if (m_posts[i].authorHandle == m_currentFollowingHandle) {
@@ -1058,6 +1092,51 @@ void MainWindow::updateStatusBar() {
 
     QString status = QString("已采集: %1 | 已关注: %2 | 待关注: %3").arg(total).arg(followed).arg(pending);
     m_statsLabel->setText(status);
+}
+
+void MainWindow::ensureTodayDailyStats(bool persist) {
+    const QDate today = QDate::currentDate();
+    if (m_todayDate == today) {
+        return;
+    }
+    m_todayDate = today;
+    m_todayFollowCount = 0;
+    m_todayUnfollowCount = 0;
+    if (persist) {
+        QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+        settings.setValue("todayDate", m_todayDate.toString(Qt::ISODate));
+        settings.setValue("todayFollowCount", 0);
+        settings.setValue("todayUnfollowCount", 0);
+    }
+}
+
+void MainWindow::bumpTodayFollowCount() {
+    ensureTodayDailyStats(false);
+    ++m_todayFollowCount;
+    updateDailyStatsLabels();
+    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+    settings.setValue("todayDate", m_todayDate.toString(Qt::ISODate));
+    settings.setValue("todayFollowCount", m_todayFollowCount);
+    settings.setValue("todayUnfollowCount", m_todayUnfollowCount);
+}
+
+void MainWindow::bumpTodayUnfollowCount() {
+    ensureTodayDailyStats(false);
+    ++m_todayUnfollowCount;
+    updateDailyStatsLabels();
+    QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
+    settings.setValue("todayDate", m_todayDate.toString(Qt::ISODate));
+    settings.setValue("todayFollowCount", m_todayFollowCount);
+    settings.setValue("todayUnfollowCount", m_todayUnfollowCount);
+}
+
+void MainWindow::updateDailyStatsLabels() {
+    if (m_todayFollowLabel) {
+        m_todayFollowLabel->setText(QString("当日关注总数: %1").arg(m_todayFollowCount));
+    }
+    if (m_todayUnfollowLabel) {
+        m_todayUnfollowLabel->setText(QString("当日取关总数: %1").arg(m_todayUnfollowCount));
+    }
 }
 
 void MainWindow::injectMonitorScript() {
@@ -1740,6 +1819,8 @@ void MainWindow::onUnfollowSuccess(const QString& userHandle) {
 
     // 记录日志
     appendLog(QString("已取消关注 @%1").arg(userHandle));
+
+    bumpTodayUnfollowCount();
 
     // 醒目显示：已取消关注（橙色）
     m_cooldownLabel->setStyleSheet("QLabel { background-color: #f0ad4e; color: white; font-size: 16px; font-weight: bold; padding: 10px; }");
