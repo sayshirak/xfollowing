@@ -57,6 +57,8 @@ MainWindow::MainWindow(QWidget* parent)
     , m_autoFollowBtn(nullptr)
     , m_unfollowDaysSpinBox(nullptr)
     , m_sleepHoursEdit(nullptr)
+    , m_dailyFollowLimitSpinBox(nullptr)
+    , m_dailyUnfollowLimitSpinBox(nullptr)
     , m_exportUsersBtn(nullptr)
     , m_isExportingFollowing(false)
     , m_languageComboBox(nullptr)
@@ -325,6 +327,29 @@ void MainWindow::setupUI() {
     });
     sleepLayout->addWidget(sleepHoursLabel);
     sleepLayout->addWidget(m_sleepHoursEdit);
+
+    QLabel* dailyFollowLimitLabel = new QLabel("单日关注上限:", m_centerPanel);
+    dailyFollowLimitLabel->setToolTip("与当日关注总数比较，达到后禁止自动/手动关注");
+    m_dailyFollowLimitSpinBox = new QSpinBox(m_centerPanel);
+    m_dailyFollowLimitSpinBox->setRange(1, 9999);
+    m_dailyFollowLimitSpinBox->setValue(400);
+    m_dailyFollowLimitSpinBox->setToolTip("与当日关注总数比较，达到后禁止自动/手动关注");
+    connect(m_dailyFollowLimitSpinBox, QOverload<int>::of(&QSpinBox::valueChanged),
+            this, [this](int) { saveSettings(); });
+    sleepLayout->addWidget(dailyFollowLimitLabel);
+    sleepLayout->addWidget(m_dailyFollowLimitSpinBox);
+
+    QLabel* dailyUnfollowLimitLabel = new QLabel("单日取关上限:", m_centerPanel);
+    dailyUnfollowLimitLabel->setToolTip("与当日取关总数比较，达到后不再做回关检查/取关");
+    m_dailyUnfollowLimitSpinBox = new QSpinBox(m_centerPanel);
+    m_dailyUnfollowLimitSpinBox->setRange(1, 9999);
+    m_dailyUnfollowLimitSpinBox->setValue(400);
+    m_dailyUnfollowLimitSpinBox->setToolTip("与当日取关总数比较，达到后不再做回关检查/取关");
+    connect(m_dailyUnfollowLimitSpinBox, QOverload<int>::of(&QSpinBox::valueChanged),
+            this, [this](int) { saveSettings(); });
+    sleepLayout->addWidget(dailyUnfollowLimitLabel);
+    sleepLayout->addWidget(m_dailyUnfollowLimitSpinBox);
+
     sleepLayout->addStretch();
 
     // 导出关注用户（红框 Data|X|GitHub 下方）
@@ -614,6 +639,10 @@ void MainWindow::loadSettings() {
         m_sleepHoursEdit->setText("1");
     }
 
+    // 单日关注 / 取关上限（默认 400）
+    m_dailyFollowLimitSpinBox->setValue(settings.value("dailyFollowLimit", 400).toInt());
+    m_dailyUnfollowLimitSpinBox->setValue(settings.value("dailyUnfollowLimit", 400).toInt());
+
     // 粉丝/关注比值：缺省写入 1.5
     if (!settings.contains("followerRatio")) {
         settings.setValue("followerRatio", 1.5);
@@ -650,6 +679,10 @@ void MainWindow::saveSettings() {
     // 保存关注失败休眠时间（小时）
     settings.setValue("sleepHours", sleepHours());
 
+    // 单日关注 / 取关上限
+    settings.setValue("dailyFollowLimit", dailyFollowLimit());
+    settings.setValue("dailyUnfollowLimit", dailyUnfollowLimit());
+
     // 粉丝数/关注数上限比值（保留用户手工改过的值）
     settings.setValue("followerRatio", followerRatio());
 
@@ -666,6 +699,43 @@ double MainWindow::followerRatio() const {
     QSettings settings(QCoreApplication::applicationDirPath() + "/settings.ini", QSettings::IniFormat);
     const double d = settings.value("followerRatio", 1.5).toDouble();
     return (d > 0.0) ? d : 1.5;
+}
+
+int MainWindow::dailyFollowLimit() const {
+    if (!m_dailyFollowLimitSpinBox) {
+        return 400;
+    }
+    return m_dailyFollowLimitSpinBox->value();
+}
+
+int MainWindow::dailyUnfollowLimit() const {
+    if (!m_dailyUnfollowLimitSpinBox) {
+        return 400;
+    }
+    return m_dailyUnfollowLimitSpinBox->value();
+}
+
+bool MainWindow::isDailyFollowLimitReached() {
+    ensureTodayDailyStats(false);
+    return m_todayFollowCount >= dailyFollowLimit();
+}
+
+bool MainWindow::isDailyUnfollowLimitReached() {
+    ensureTodayDailyStats(false);
+    return m_todayUnfollowCount >= dailyUnfollowLimit();
+}
+
+void MainWindow::stopAutoFollowDueToDailyLimit() {
+    if (!m_isAutoFollowing) {
+        return;
+    }
+    m_isAutoFollowing = false;
+    m_autoFollowBtn->blockSignals(true);
+    m_autoFollowBtn->setChecked(false);
+    m_autoFollowBtn->blockSignals(false);
+    m_autoFollowBtn->setText("自动关注");
+    m_postListPanel->setEnabled(true);
+    m_followedAuthorsTable->setEnabled(true);
 }
 
 void MainWindow::annotateSettingsIniComments() const {
@@ -696,6 +766,10 @@ void MainWindow::annotateSettingsIniComments() const {
          QStringLiteral("未回关取关天数：关注超过此天数且未回关则取消关注")},
         {QStringLiteral("sleepHours"),
          QStringLiteral("连续关注失败3次后的休眠小时数（正整数）")},
+        {QStringLiteral("dailyFollowLimit"),
+         QStringLiteral("单日关注上限：与 todayFollowCount 比较，达到后禁止自动/手动关注（默认400）")},
+        {QStringLiteral("dailyUnfollowLimit"),
+         QStringLiteral("单日取关上限：与 todayUnfollowCount 比较，达到后不再做回关检查（默认400）")},
         {QStringLiteral("followerRatio"),
          QStringLiteral("粉丝数/关注数上限比值：大于等于此值则跳过关注（默认1.5）")},
         {QStringLiteral("todayDate"),
@@ -861,6 +935,12 @@ void MainWindow::onPostClicked(const Post& post) {
         return;
     }
 
+    if (isDailyFollowLimitReached()) {
+        appendLog(QString("已达单日关注上限 %1，禁止手动关注").arg(dailyFollowLimit()));
+        m_statusLabel->setText(QString("状态: 已达单日关注上限 %1").arg(dailyFollowLimit()));
+        return;
+    }
+
     const QString hit = matchBlacklistKeyword(post.authorName, post.authorHandle);
     if (!hit.isEmpty()) {
         appendLog(QString("跳过 @%1：名称/ID 含黑名单词「%2」").arg(post.authorHandle).arg(hit));
@@ -898,6 +978,10 @@ void MainWindow::onNewPostsFound(const QString& jsonData) {
 
     QJsonArray arr = doc.array();
     int newCount = 0;
+    int skipInvalid = 0;
+    int skipLang = 0;
+    int skipBlacklist = 0;
+    int skipDup = 0;
 
     for (const auto& v : arr) {
         QJsonObject obj = v.toObject();
@@ -924,6 +1008,7 @@ void MainWindow::onNewPostsFound(const QString& jsonData) {
 
         // 跳过无效数据
         if (post.authorHandle.isEmpty() || post.postId.isEmpty()) {
+            ++skipInvalid;
             continue;
         }
 
@@ -931,6 +1016,7 @@ void MainWindow::onNewPostsFound(const QString& jsonData) {
         QString nameLang, bioLang;
         if (!LanguageFilter::passesLanguageFilter(post.authorName, post.bio, m_selectedLanguage,
                                                   &nameLang, &bioLang)) {
+            ++skipLang;
             continue;
         }
         post.nameLang = nameLang;
@@ -938,6 +1024,7 @@ void MainWindow::onNewPostsFound(const QString& jsonData) {
 
         // 黑名单：名称或 ID 包含关键词则不入库
         if (!matchBlacklistKeyword(post.authorName, post.authorHandle).isEmpty()) {
+            ++skipBlacklist;
             continue;
         }
 
@@ -952,6 +1039,8 @@ void MainWindow::onNewPostsFound(const QString& jsonData) {
                     m_posts[i].collectTime = QDateTime::currentDateTime();
                     m_dataStorage->updatePost(m_posts[i]);
                     newCount++;  // 标记有变化，需要重新排序
+                } else {
+                    ++skipDup;
                 }
                 break;
             }
@@ -963,6 +1052,10 @@ void MainWindow::onNewPostsFound(const QString& jsonData) {
             newCount++;
         }
     }
+
+    appendLog(QString("搜索入库: 收到%1 新增/更新%2 跳过(无效%3/语言%4/黑名单%5/已关注去重%6)")
+                  .arg(arr.size()).arg(newCount)
+                  .arg(skipInvalid).arg(skipLang).arg(skipBlacklist).arg(skipDup));
 
     if (newCount > 0) {
         // 排序：固定帖子始终第一，其他按采集时间降序（最新发现的在前）
@@ -1475,6 +1568,16 @@ void MainWindow::onAutoFollowToggled() {
     m_isAutoFollowing = m_autoFollowBtn->isChecked();
 
     if (m_isAutoFollowing) {
+        if (isDailyFollowLimitReached()) {
+            m_isAutoFollowing = false;
+            m_autoFollowBtn->blockSignals(true);
+            m_autoFollowBtn->setChecked(false);
+            m_autoFollowBtn->blockSignals(false);
+            appendLog(QString("已达单日关注上限 %1，无法启动自动关注").arg(dailyFollowLimit()));
+            m_statusLabel->setText(QString("状态: 已达单日关注上限 %1").arg(dailyFollowLimit()));
+            return;
+        }
+
         m_autoFollowBtn->setText("停止关注");
         m_statusLabel->setText("状态: 自动关注已启动");
         qDebug() << "[INFO] Auto-follow started";
@@ -1515,6 +1618,13 @@ void MainWindow::onAutoFollowToggled() {
 
 void MainWindow::processNextAutoFollow() {
     if (!m_isAutoFollowing) {
+        return;
+    }
+
+    if (isDailyFollowLimitReached()) {
+        appendLog(QString("已达单日关注上限 %1，停止自动关注").arg(dailyFollowLimit()));
+        m_statusLabel->setText(QString("状态: 已达单日关注上限 %1").arg(dailyFollowLimit()));
+        stopAutoFollowDueToDailyLimit();
         return;
     }
 
@@ -1737,6 +1847,10 @@ void MainWindow::loadUnfollowWhitelist() {
 void MainWindow::startFollowBackCheck() {
     if (m_isCheckingFollowBack) {
         return;  // 已经在检查中
+    }
+    if (isDailyUnfollowLimitReached()) {
+        appendLog(QString("已达单日取关上限 %1，跳过回关检查").arg(dailyUnfollowLimit()));
+        return;
     }
     loadUnfollowWhitelist();
     m_isCheckingFollowBack = true;
@@ -2250,8 +2364,16 @@ void MainWindow::startFollowersBrowsing() {
     }
 
     if (followedUsers.isEmpty()) {
-        appendLog("没有互关用户，暂停粉丝采集");
-        qDebug() << "[INFO] No followed users, pause followers browsing";
+        int followedTotal = 0;
+        for (const auto& post : m_posts) {
+            if (post.isFollowed) {
+                ++followedTotal;
+            }
+        }
+        appendLog(QString("没有互关用户，暂停粉丝采集（列表共%1条，已关注%2，排除固定作者后为0）")
+                      .arg(m_posts.size()).arg(followedTotal));
+        qDebug() << "[INFO] No followed users, pause followers browsing. posts="
+                 << m_posts.size() << "followed=" << followedTotal;
         return;
     }
 
@@ -2306,6 +2428,10 @@ void MainWindow::onNewFollowersFound(const QString& jsonData) {
 
     QJsonArray arr = doc.array();
     int newCount = 0;
+    int skipEmpty = 0;
+    int skipDup = 0;
+    int skipLang = 0;
+    int skipBlacklist = 0;
 
     for (const auto& v : arr) {
         QJsonObject obj = v.toObject();
@@ -2313,6 +2439,7 @@ void MainWindow::onNewFollowersFound(const QString& jsonData) {
 
         // 跳过空的handle
         if (userHandle.isEmpty()) {
+            ++skipEmpty;
             continue;
         }
 
@@ -2343,20 +2470,28 @@ void MainWindow::onNewFollowersFound(const QString& jsonData) {
             QString nameLang, bioLang;
             if (!LanguageFilter::passesLanguageFilter(post.authorName, post.bio, m_selectedLanguage,
                                                       &nameLang, &bioLang)) {
+                ++skipLang;
                 continue;
             }
             post.nameLang = nameLang;
             post.bioLang = bioLang;
 
             if (!matchBlacklistKeyword(post.authorName, post.authorHandle).isEmpty()) {
+                ++skipBlacklist;
                 continue;
             }
 
             m_posts.append(post);
             m_dataStorage->addPost(post);
             newCount++;
+        } else {
+            ++skipDup;
         }
     }
+
+    appendLog(QString("粉丝入库: 收到%1 新增%2 跳过(空%3/已存在%4/语言%5/黑名单%6)")
+                  .arg(arr.size()).arg(newCount)
+                  .arg(skipEmpty).arg(skipDup).arg(skipLang).arg(skipBlacklist));
 
     if (newCount > 0) {
         // 排序：固定帖子始终第一，其他按采集时间降序

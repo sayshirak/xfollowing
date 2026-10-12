@@ -88,6 +88,11 @@ private:
     void annotateSettingsIniComments() const;
     // 粉丝/关注数比值上限，从 settings.ini 的 followerRatio 读取，默认 1.5
     double followerRatio() const;
+    int dailyFollowLimit() const;     // 单日关注上限，默认 400
+    int dailyUnfollowLimit() const;   // 单日取关上限，默认 400
+    bool isDailyFollowLimitReached();   // 与 todayFollowCount 比较（会先做跨日检查）
+    bool isDailyUnfollowLimitReached(); // 与 todayUnfollowCount 比较
+    void stopAutoFollowDueToDailyLimit();
     void updateStatusBar();
     void injectMonitorScript();
     void addPinnedAuthorPost();
@@ -143,6 +148,8 @@ private:
     QPushButton* m_autoFollowBtn;
     QSpinBox* m_unfollowDaysSpinBox;  // 取关天数设置
     QLineEdit* m_sleepHoursEdit;      // 关注失败休眠时间（小时）
+    QSpinBox* m_dailyFollowLimitSpinBox;   // 单日关注上限
+    QSpinBox* m_dailyUnfollowLimitSpinBox; // 单日取关上限
     QPushButton* m_exportUsersBtn;    // 导出关注用户
 
     // 导出关注列表
