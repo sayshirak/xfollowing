@@ -1006,9 +1006,15 @@ void MainWindow::onNewPostsFound(const QString& jsonData) {
             post.postTime = QDateTime::currentDateTime();
         }
 
+        const QString who = post.authorHandle.isEmpty()
+                                ? QStringLiteral("(无handle)")
+                                : QStringLiteral("@%1").arg(post.authorHandle);
+
         // 跳过无效数据
         if (post.authorHandle.isEmpty() || post.postId.isEmpty()) {
             ++skipInvalid;
+            appendLog(QString("搜索入库跳过[无效]: %1 postId=%2 昵称=%3")
+                          .arg(who, post.postId, post.authorName));
             continue;
         }
 
@@ -1017,14 +1023,22 @@ void MainWindow::onNewPostsFound(const QString& jsonData) {
         if (!LanguageFilter::passesLanguageFilter(post.authorName, post.bio, m_selectedLanguage,
                                                   &nameLang, &bioLang)) {
             ++skipLang;
+            appendLog(QString("搜索入库跳过[语言]: %1 昵称=\"%2\"(判定=%3) 简介=\"%4\"(判定=%5) 需=%6；"
+                              "注意语言只看昵称/简介，不看正文")
+                          .arg(who, post.authorName, nameLang,
+                               post.bio.isEmpty() ? QStringLiteral("(空)") : post.bio.left(40),
+                               bioLang, m_selectedLanguage));
             continue;
         }
         post.nameLang = nameLang;
         post.bioLang = bioLang;
 
         // 黑名单：名称或 ID 包含关键词则不入库
-        if (!matchBlacklistKeyword(post.authorName, post.authorHandle).isEmpty()) {
+        const QString blHit = matchBlacklistKeyword(post.authorName, post.authorHandle);
+        if (!blHit.isEmpty()) {
             ++skipBlacklist;
+            appendLog(QString("搜索入库跳过[黑名单]: %1 命中=\"%2\"")
+                          .arg(who, blHit));
             continue;
         }
 
@@ -1039,8 +1053,11 @@ void MainWindow::onNewPostsFound(const QString& jsonData) {
                     m_posts[i].collectTime = QDateTime::currentDateTime();
                     m_dataStorage->updatePost(m_posts[i]);
                     newCount++;  // 标记有变化，需要重新排序
+                    appendLog(QString("搜索入库刷新: %1 未关注，更新采集时间靠前").arg(who));
                 } else {
                     ++skipDup;
+                    appendLog(QString("搜索入库跳过[已关注去重]: %1 本地已是已关注，不再入库")
+                                  .arg(who));
                 }
                 break;
             }
@@ -1050,10 +1067,12 @@ void MainWindow::onNewPostsFound(const QString& jsonData) {
             m_posts.append(post);
             m_dataStorage->addPost(post);
             newCount++;
+            appendLog(QString("搜索入库成功: %1 关键词=%2 昵称语言=%3 简介语言=%4")
+                          .arg(who, post.matchedKeyword, post.nameLang, post.bioLang));
         }
     }
 
-    appendLog(QString("搜索入库: 收到%1 新增/更新%2 跳过(无效%3/语言%4/黑名单%5/已关注去重%6)")
+    appendLog(QString("搜索入库汇总: 收到%1 新增/更新%2 跳过(无效%3/语言%4/黑名单%5/已关注去重%6)")
                   .arg(arr.size()).arg(newCount)
                   .arg(skipInvalid).arg(skipLang).arg(skipBlacklist).arg(skipDup));
 

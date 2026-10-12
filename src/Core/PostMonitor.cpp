@@ -76,7 +76,13 @@ QString PostMonitor::getMonitorScript(const QList<Keyword>& keywords,
         return '';
     }
 
-    // 返回 { post } 或 { reject: 原因 }，便于统计卡在哪一步
+    function clipText(s, n) {
+        s = String(s || '').replace(/\s+/g, ' ').trim();
+        if (s.length <= n) return s;
+        return s.slice(0, n) + '…';
+    }
+
+    // 返回 { post } 或 { reject, handle, name, why }；why 为中文说明，便于逐条排查
     function parsePost(article) {
         try {
             const authorLinks = article.querySelectorAll('a[href^="/"]');
@@ -92,19 +98,52 @@ QString PostMonitor::getMonitorScript(const QList<Keyword>& keywords,
                 }
             }
 
-            if (!authorHandle) return { reject: 'no_handle' };
-            if (hitsBlacklist(authorName, authorHandle)) return { reject: 'blacklist' };
+            const who = authorHandle ? ('@' + authorHandle) : '(无handle)';
+            const namePart = authorName ? (' 昵称="' + clipText(authorName, 40) + '"') : '';
+
+            if (!authorHandle) {
+                return {
+                    reject: 'no_handle',
+                    handle: '',
+                    name: '',
+                    why: '无法解析作者 handle，跳过'
+                };
+            }
+
+            const bl = hitsBlacklist(authorName, authorHandle);
+            if (bl) {
+                return {
+                    reject: 'blacklist',
+                    handle: authorHandle,
+                    name: authorName,
+                    why: who + namePart + ' 命中黑名单关键词="' + bl + '"，跳过'
+                };
+            }
 
             const verifiedBadge = article.querySelector('[data-testid="icon-verified"]') ||
                                   article.querySelector('svg[aria-label="Verified account"]') ||
                                   article.querySelector('svg[aria-label="已认证帐号"]') ||
                                   article.querySelector('[aria-label="Verified account"]') ||
                                   article.querySelector('[aria-label="已认证帐号"]');
-            if (!verifiedBadge) return { reject: 'no_blue_v' };
+            if (!verifiedBadge) {
+                return {
+                    reject: 'no_blue_v',
+                    handle: authorHandle,
+                    name: authorName,
+                    why: who + namePart + ' 未识别到蓝V认证图标，跳过'
+                };
+            }
 
             const contentDiv = article.querySelector('[data-testid="tweetText"]');
             const content = contentDiv ? contentDiv.innerText : '';
-            if (!content) return { reject: 'no_content' };
+            if (!content) {
+                return {
+                    reject: 'no_content',
+                    handle: authorHandle,
+                    name: authorName,
+                    why: who + namePart + ' 已是蓝V，但无帖子正文(tweetText为空)，跳过'
+                };
+            }
 
             let matchedKeyword = null;
             for (const kw of keywords) {
@@ -113,19 +152,53 @@ QString PostMonitor::getMonitorScript(const QList<Keyword>& keywords,
                     break;
                 }
             }
-            if (!matchedKeyword) return { reject: 'no_keyword' };
+            if (!matchedKeyword) {
+                return {
+                    reject: 'no_keyword',
+                    handle: authorHandle,
+                    name: authorName,
+                    why: who + namePart + ' 已是蓝V，但正文不含关键词' + JSON.stringify(keywords) +
+                         '；正文="' + clipText(content, 80) + '"，跳过'
+                };
+            }
 
             const statusLink = article.querySelector('a[href*="/status/"]');
             const postUrl = statusLink ? 'https://x.com' + statusLink.getAttribute('href') : '';
             const postId = postUrl.split('/status/')[1]?.split('?')[0] || '';
-            if (!postId) return { reject: 'no_post_id' };
+            if (!postId) {
+                return {
+                    reject: 'no_post_id',
+                    handle: authorHandle,
+                    name: authorName,
+                    why: who + namePart + ' 已匹配关键词"' + matchedKeyword +
+                         '"，但无法解析 postId，跳过'
+                };
+            }
 
             const timeElement = article.querySelector('time');
             const postTime = timeElement ? timeElement.getAttribute('datetime') : '';
 
             const bio = extractBioFromArticle(article);
+            const nameLang = xfollowDetectLanguage(authorName);
+            const bioTrim = (bio || '').trim();
+            const bioLang = bioTrim ? xfollowDetectLanguage(bioTrim) : 'other';
+            const contentLang = xfollowDetectLanguage(content);
             const langOk = xfollowPassesLanguageFilter(authorName, bio, selectedLang);
-            if (!langOk) return { reject: 'lang_fail' };
+            if (!langOk) {
+                return {
+                    reject: 'lang_fail',
+                    handle: authorHandle,
+                    name: authorName,
+                    why: who + namePart +
+                         ' 已是蓝V且正文含关键词"' + matchedKeyword +
+                         '"，但语言未过(需昵称或简介为' + selectedLang +
+                         ')；昵称语言=' + nameLang +
+                         ' 简介语言=' + bioLang +
+                         (bioTrim ? (' 简介="' + clipText(bioTrim, 40) + '"') : ' 简介=(空,搜索卡片常无简介)') +
+                         ' 正文语言=' + contentLang + '(正文不参与语言判定)' +
+                         ' 正文="' + clipText(content, 60) + '"，跳过'
+                };
+            }
 
             return {
                 post: {
@@ -140,11 +213,14 @@ QString PostMonitor::getMonitorScript(const QList<Keyword>& keywords,
                     bio: langOk.bio,
                     nameLang: langOk.nameLang,
                     bioLang: langOk.bioLang
-                }
+                },
+                why: who + namePart + ' 通过全部过滤(蓝V+关键词"' + matchedKeyword +
+                     '"+语言' + selectedLang + ' 昵称=' + langOk.nameLang +
+                     ' 简介=' + langOk.bioLang + ')，将入库待关注'
             };
         } catch (e) {
             console.log('[XFOLLOW] Parse error:', e);
-            return { reject: 'parse_error' };
+            return { reject: 'parse_error', handle: '', name: '', why: '解析异常: ' + e };
         }
     }
 
@@ -170,9 +246,11 @@ QString PostMonitor::getMonitorScript(const QList<Keyword>& keywords,
 
         articles.forEach(article => {
             const statusLink = article.querySelector('a[href*="/status/"]');
-            const postId = statusLink?.getAttribute('href')?.split('/status/')[1]?.split('?')[0];
+            const href = statusLink ? statusLink.getAttribute('href') : '';
+            const postId = href ? href.split('/status/')[1]?.split('?')[0] : '';
             if (!postId) {
                 bumpReject(stats, 'no_post_id');
+                console.log('[XFOLLOW] 搜索跳过: 页面帖子无 status 链接，无法解析 postId');
                 return;
             }
             if (window.xfollowingProcessedIds.has(postId)) {
@@ -185,14 +263,19 @@ QString PostMonitor::getMonitorScript(const QList<Keyword>& keywords,
             if (result.post) {
                 stats.pass++;
                 newPosts.push(result.post);
+                console.log('[XFOLLOW] 搜索可关注: ' + (result.why || ('@' + result.post.authorHandle)));
             } else {
                 bumpReject(stats, result.reject || 'unknown');
+                console.log('[XFOLLOW] 搜索无法关注: [' + (result.reject || 'unknown') + '] ' +
+                            (result.why || '未知原因'));
             }
         });
 
         const now = Date.now();
         if (!window.xfollowingLastScanLogAt) window.xfollowingLastScanLogAt = 0;
-        const shouldLog = forceLog || stats.pass > 0 || (now - window.xfollowingLastScanLogAt > 10000);
+        // examined>0 时也打：否则 MutationObserver 先扫过、全被过滤时，后续只见 already、看不到 reject
+        const shouldLog = forceLog || stats.pass > 0 || stats.examined > 0 ||
+                          (now - window.xfollowingLastScanLogAt > 10000);
         if (shouldLog) {
             window.xfollowingLastScanLogAt = now;
             console.log('[XFOLLOW] ScanPosts(' + (tag || 'tick') + '): articles=' + stats.articles +
@@ -398,7 +481,8 @@ QString PostMonitor::getFollowersMonitorScript(const QString& selectedLang,
 
         const now = Date.now();
         if (!window.xfollowingLastFollowerLogAt) window.xfollowingLastFollowerLogAt = 0;
-        const shouldLog = forceLog || stats.pass > 0 || (now - window.xfollowingLastFollowerLogAt > 10000);
+        const shouldLog = forceLog || stats.pass > 0 || stats.examined > 0 ||
+                          (now - window.xfollowingLastFollowerLogAt > 10000);
         if (shouldLog) {
             window.xfollowingLastFollowerLogAt = now;
             console.log('[XFOLLOW] ScanFollowers: cells=' + stats.cells +
