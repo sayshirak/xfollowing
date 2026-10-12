@@ -82,6 +82,56 @@ QString PostMonitor::getMonitorScript(const QList<Keyword>& keywords,
         return s.slice(0, n) + '…';
     }
 
+    // 显示昵称：优先作者主页链接内文案，再 UserName；绝不把 @id / handle 当昵称
+    function isBadDisplayName(t, handle) {
+        if (!t) return true;
+        t = String(t).replace(/\s+/g, ' ').trim();
+        if (!t || t.startsWith('@')) return true;
+        const h = String(handle || '').toLowerCase();
+        if (!h) return false;
+        const low = t.toLowerCase();
+        return low === h || low === ('@' + h);
+    }
+
+    function pickNameFromNode(node, handle) {
+        if (!node) return '';
+        const els = node.querySelectorAll('div[dir="auto"], span[dir="auto"], span');
+        for (const el of els) {
+            const raw = (el.textContent || el.innerText || '').trim();
+            if (!raw) continue;
+            const first = raw.split('\n')[0].replace(/\s+/g, ' ').trim();
+            if (!isBadDisplayName(first, handle)) return first;
+        }
+        const top = (node.textContent || node.innerText || '').trim();
+        const first = top.split('\n')[0].replace(/\s+/g, ' ').trim();
+        if (!isBadDisplayName(first, handle)) return first;
+        return '';
+    }
+
+    function extractDisplayName(root, handle) {
+        if (!root || !handle) return '';
+        const href = '/' + handle;
+        const links = root.querySelectorAll('a[href="' + href + '"], a[href^="' + href + '?"]');
+        for (const link of links) {
+            const name = pickNameFromNode(link, handle);
+            if (name) return name;
+        }
+        const blocks = root.querySelectorAll('[data-testid="UserName"], [data-testid="User-Name"]');
+        for (const block of blocks) {
+            const name = pickNameFromNode(block, handle);
+            if (name) return name;
+        }
+        const tweetText = root.querySelector('[data-testid="tweetText"]');
+        const autos = root.querySelectorAll('div[dir="auto"]');
+        for (const el of autos) {
+            if (tweetText && tweetText.contains(el)) continue;
+            const first = (el.textContent || el.innerText || '')
+                .split('\n')[0].replace(/\s+/g, ' ').trim();
+            if (!isBadDisplayName(first, handle)) return first;
+        }
+        return '';
+    }
+
     // 返回 { post } 或 { reject, handle, name, why }；why 为中文说明，便于逐条排查
     function parsePost(article) {
         try {
@@ -93,10 +143,11 @@ QString PostMonitor::getMonitorScript(const QList<Keyword>& keywords,
                 const href = link.getAttribute('href');
                 if (href && href.match(/^\/[a-zA-Z0-9_]+$/) && !href.includes('/status/')) {
                     authorHandle = href.substring(1);
-                    authorName = link.innerText || authorHandle;
                     break;
                 }
             }
+            authorName = extractDisplayName(article, authorHandle);
+            if (!authorName) authorName = authorHandle;
 
             const who = authorHandle ? ('@' + authorHandle) : '(无handle)';
             const namePart = authorName ? (' 昵称="' + clipText(authorName, 40) + '"') : '';
@@ -369,6 +420,54 @@ QString PostMonitor::getFollowersMonitorScript(const QString& selectedLang,
         return best;
     }
 
+    function isBadDisplayName(t, handle) {
+        if (!t) return true;
+        t = String(t).replace(/\s+/g, ' ').trim();
+        if (!t || t.startsWith('@')) return true;
+        const h = String(handle || '').toLowerCase();
+        if (!h) return false;
+        const low = t.toLowerCase();
+        return low === h || low === ('@' + h);
+    }
+
+    function pickNameFromNode(node, handle) {
+        if (!node) return '';
+        const els = node.querySelectorAll('div[dir="auto"], span[dir="auto"], span');
+        for (const el of els) {
+            const raw = (el.textContent || el.innerText || '').trim();
+            if (!raw) continue;
+            const first = raw.split('\n')[0].replace(/\s+/g, ' ').trim();
+            if (!isBadDisplayName(first, handle)) return first;
+        }
+        const top = (node.textContent || node.innerText || '').trim();
+        const first = top.split('\n')[0].replace(/\s+/g, ' ').trim();
+        if (!isBadDisplayName(first, handle)) return first;
+        return '';
+    }
+
+    function extractDisplayName(root, handle) {
+        if (!root || !handle) return '';
+        const href = '/' + handle;
+        const links = root.querySelectorAll('a[href="' + href + '"], a[href^="' + href + '?"]');
+        for (const link of links) {
+            const name = pickNameFromNode(link, handle);
+            if (name) return name;
+        }
+        const blocks = root.querySelectorAll('[data-testid="UserName"], [data-testid="User-Name"]');
+        for (const block of blocks) {
+            const name = pickNameFromNode(block, handle);
+            if (name) return name;
+        }
+        const autos = root.querySelectorAll('div[dir="auto"]');
+        for (const el of autos) {
+            if (el.closest('[data-testid="UserDescription"]')) continue;
+            const first = (el.textContent || el.innerText || '')
+                .split('\n')[0].replace(/\s+/g, ' ').trim();
+            if (!isBadDisplayName(first, handle)) return first;
+        }
+        return '';
+    }
+
     // 返回 { follower } 或 { reject: 原因 }
     function parseFollower(userCell) {
         try {
@@ -380,16 +479,11 @@ QString PostMonitor::getFollowersMonitorScript(const QString& selectedLang,
                 const href = link.getAttribute('href');
                 if (href && href.match(/^\/[a-zA-Z0-9_]+$/) && !href.includes('/status/')) {
                     userHandle = href.substring(1);
-                    const nameSpan = link.querySelector('span');
-                    userName = nameSpan ? nameSpan.innerText : userHandle;
-                    const userNameBlock = userCell.querySelector('[data-testid="UserName"]');
-                    if (userNameBlock) {
-                        const firstSpan = userNameBlock.querySelector('span');
-                        if (firstSpan && firstSpan.innerText) userName = firstSpan.innerText.trim();
-                    }
                     break;
                 }
             }
+            userName = extractDisplayName(userCell, userHandle);
+            if (!userName) userName = userHandle;
 
             if (!userHandle) return { reject: 'no_handle' };
             if (hitsBlacklist(userName, userHandle)) return { reject: 'blacklist' };
