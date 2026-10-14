@@ -139,6 +139,16 @@ if(WIN32)
             COMMENT "Running windeployqt to deploy Qt DLLs..."
         )
     endif()
+
+    # 同步可执行文件到 xfollowing-release（与开发目录 xfollowing 并存）
+    add_custom_command(TARGET xfollowing POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${CMAKE_SOURCE_DIR}/xfollowing-release"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:xfollowing>
+            "${CMAKE_SOURCE_DIR}/xfollowing-release/xfollowing.exe"
+        COMMENT "Copying xfollowing.exe to xfollowing-release..."
+    )
 endif()
 
 qt_finalize_executable(xfollowing)

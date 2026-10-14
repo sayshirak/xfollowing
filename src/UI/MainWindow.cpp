@@ -73,6 +73,8 @@ MainWindow::MainWindow(QWidget* parent)
     , m_cefTimerId(0)
     , m_searchBrowserInitialized(false)
     , m_userBrowserInitialized(false)
+    , m_sameUserFailCount(0)
+    , m_resumeSameUserAfterCooldown(false)
     , m_cooldownTimer(nullptr)
     , m_cooldownMinSeconds(60)
     , m_cooldownMaxSeconds(180)
@@ -912,7 +914,7 @@ void MainWindow::onUserLoadFinished(bool success) {
     // 关注模式
     if (!m_currentFollowingHandle.isEmpty()) {
         qDebug() << "[INFO] User page loaded, executing follow script for:" << m_currentFollowingHandle;
-        m_statusLabel->setText(QString("状态: 正在关注 @%1...").arg(m_currentFollowingHandle));
+        m_statusLabel->setText(QString("状态: 浏览 @%1 主页后关注...").arg(m_currentFollowingHandle));
 
         // 执行自动关注脚本（比值每次从 settings.ini 的 followerRatio 读取，默认 1.5）
         QString script = m_autoFollower->getFollowScript(m_selectedLanguage, followerRatio(),
@@ -1098,6 +1100,9 @@ void MainWindow::onFollowSuccess(const QString& userHandle) {
     appendLog(QString("关注 @%1 成功").arg(m_currentFollowingHandle));
 
     bumpTodayFollowCount();
+    m_sameUserFailCount = 0;
+    m_consecutiveFailures = 0;
+    m_resumeSameUserAfterCooldown = false;
 
     // 更新帖子状态
     for (int i = 0; i < m_posts.size(); ++i) {
@@ -1140,6 +1145,8 @@ void MainWindow::onAlreadyFollowing(const QString& userHandle) {
     updateStatusBar();
 
     m_statusLabel->setText(QString("状态: @%1 已经关注过了").arg(m_currentFollowingHandle));
+    m_sameUserFailCount = 0;
+    m_resumeSameUserAfterCooldown = false;
     m_currentFollowingHandle.clear();
 
     // 如果是自动关注模式，跳过此用户，继续处理下一个（无需冷却）
@@ -1151,25 +1158,56 @@ void MainWindow::onAlreadyFollowing(const QString& userHandle) {
 void MainWindow::onFollowFailed(const QString& userHandle) {
     qDebug() << "[ERROR] Follow failed:" << userHandle;
 
-    // 增加连续失败计数
-    m_consecutiveFailures++;
+    const QString handle = m_currentFollowingHandle.isEmpty() ? userHandle : m_currentFollowingHandle;
+    m_sameUserFailCount++;
 
-    // 记录日志
-    appendLog(QString("关注 @%1 失败 (连续%2次)").arg(m_currentFollowingHandle).arg(m_consecutiveFailures));
-    m_statusLabel->setText(QString("状态: 关注 @%1 失败").arg(m_currentFollowingHandle));
-    m_currentFollowingHandle.clear();
+    // 自动关注：同用户第 1/2 次失败分别冷却 2/3 分钟后重试；第 3 次换人
+    if (m_isAutoFollowing && !handle.isEmpty()) {
+        if (m_sameUserFailCount == 1) {
+            appendLog(QString("关注 @%1 失败（同用户第1次），冷却 2 分钟后重试").arg(handle));
+            m_statusLabel->setText(QString("状态: @%1 失败，2分钟后重试").arg(handle));
+            m_currentFollowingHandle = handle;
+            startSameUserRetryCooldown(120);
+            return;
+        }
+        if (m_sameUserFailCount == 2) {
+            appendLog(QString("关注 @%1 失败（同用户第2次），冷却 3 分钟后重试").arg(handle));
+            m_statusLabel->setText(QString("状态: @%1 失败，3分钟后重试").arg(handle));
+            m_currentFollowingHandle = handle;
+            startSameUserRetryCooldown(180);
+            return;
+        }
 
-    // 连续失败3次，进入休眠（时长由界面配置）
-    if (m_consecutiveFailures >= 3 && m_isAutoFollowing) {
-        appendLog(QString("连续失败3次，进入%1小时休眠...").arg(sleepHours()));
-        startSleep();
+        appendLog(QString("关注 @%1 失败（同用户第3次），换下一个用户").arg(handle));
+        m_statusLabel->setText(QString("状态: 关注 @%1 三次失败，换人").arg(handle));
+        m_sameUserFailCount = 0;
+        m_resumeSameUserAfterCooldown = false;
+        m_currentFollowingHandle.clear();
+
+        // 移出待关注列表，避免下一轮立刻又选中同一人
+        for (int i = m_posts.size() - 1; i >= 0; --i) {
+            if (m_posts[i].authorHandle.compare(handle, Qt::CaseInsensitive) == 0) {
+                m_posts.removeAt(i);
+            }
+        }
+        m_dataStorage->savePosts(m_posts);
+        m_postListPanel->setPosts(m_posts);
+        updateStatusBar();
+
+        m_consecutiveFailures++;
+        if (m_consecutiveFailures >= 3) {
+            appendLog(QString("连续换人失败3次，进入%1小时休眠...").arg(sleepHours()));
+            startSleep();
+            return;
+        }
+        QTimer::singleShot(1000, this, &MainWindow::processNextAutoFollow);
         return;
     }
 
-    // 如果是自动关注模式，跳过此用户，继续处理下一个（无需冷却）
-    if (m_isAutoFollowing) {
-        QTimer::singleShot(1000, this, &MainWindow::processNextAutoFollow);
-    }
+    appendLog(QString("关注 @%1 失败").arg(handle));
+    m_statusLabel->setText(QString("状态: 关注 @%1 失败").arg(handle));
+    m_sameUserFailCount = 0;
+    m_currentFollowingHandle.clear();
 }
 
 void MainWindow::onFollowSkippedLang(const QString& userHandle) {
@@ -1177,6 +1215,8 @@ void MainWindow::onFollowSkippedLang(const QString& userHandle) {
 
     appendLog(QString("跳过 @%1：语言不符").arg(userHandle));
     m_statusLabel->setText(QString("状态: @%1 语言不符，已跳过").arg(userHandle));
+    m_sameUserFailCount = 0;
+    m_resumeSameUserAfterCooldown = false;
     m_currentFollowingHandle.clear();
 
     // 从待关注列表移除，避免自动关注反复选中同一用户
@@ -1202,6 +1242,8 @@ void MainWindow::onFollowSkippedBlacklist(const QString& userHandle, const QStri
     appendLog(QString("跳过 @%1：主页名称/ID/简介含黑名单词「%2」")
                   .arg(userHandle, keyword.isEmpty() ? QStringLiteral("?") : keyword));
     m_statusLabel->setText(QString("状态: @%1 命中黑名单，已跳过").arg(userHandle));
+    m_sameUserFailCount = 0;
+    m_resumeSameUserAfterCooldown = false;
     m_currentFollowingHandle.clear();
 
     for (int i = m_posts.size() - 1; i >= 0; --i) {
@@ -1238,6 +1280,8 @@ void MainWindow::onFollowSkippedRatio(const QString& userHandle, const QString& 
 
     appendLog(QString("跳过 @%1：%2").arg(userHandle).arg(reason));
     m_statusLabel->setText(QString("状态: @%1 比值不符，已跳过").arg(userHandle));
+    m_sameUserFailCount = 0;
+    m_resumeSameUserAfterCooldown = false;
     m_currentFollowingHandle.clear();
 
     for (int i = m_posts.size() - 1; i >= 0; --i) {
@@ -1274,6 +1318,8 @@ void MainWindow::onAccountSuspended(const QString& userHandle) {
     m_postListPanel->setPosts(m_posts);
     updateStatusBar();
 
+    m_sameUserFailCount = 0;
+    m_resumeSameUserAfterCooldown = false;
     m_currentFollowingHandle.clear();
 
     // 如果是自动关注模式，继续处理下一个（无需冷却）
@@ -1405,6 +1451,8 @@ void MainWindow::injectMonitorScript() {
 }
 
 void MainWindow::startCooldown() {
+    m_resumeSameUserAfterCooldown = false;
+
     // 获取用户设置的冷却时间范围
     m_cooldownMinSeconds = m_cooldownMinSpinBox->value();
     m_cooldownMaxSeconds = m_cooldownMaxSpinBox->value();
@@ -1438,6 +1486,57 @@ void MainWindow::startCooldown() {
     qDebug() << "[INFO] Cooldown started:" << randomCooldown << "seconds (range:" << m_cooldownMinSeconds << "-" << m_cooldownMaxSeconds << ")";
 }
 
+void MainWindow::startSameUserRetryCooldown(int seconds) {
+    if (seconds < 1) {
+        seconds = 1;
+    }
+    m_resumeSameUserAfterCooldown = true;
+    m_isCheckingFollowBack = false;
+    m_currentCheckingHandle.clear();
+    m_remainingCooldown = seconds;
+    m_isCooldownActive = true;
+
+    m_postListPanel->setEnabled(false);
+    m_followedAuthorsTable->setEnabled(false);
+
+    m_cooldownLabel->setStyleSheet(
+        "QLabel { background-color: #e67e22; color: white; font-size: 16px; font-weight: bold; padding: 10px; }");
+    updateCooldownDisplay();
+    m_cooldownLabel->setVisible(true);
+    m_cooldownTimer->start(1000);
+
+    qDebug() << "[INFO] Same-user retry cooldown:" << seconds << "sec for @" << m_currentFollowingHandle;
+}
+
+void MainWindow::retryCurrentUserFollow() {
+    if (!m_isAutoFollowing || m_currentFollowingHandle.isEmpty()) {
+        processNextAutoFollow();
+        return;
+    }
+    if (isDailyFollowLimitReached()) {
+        appendLog(QString("已达单日关注上限 %1，停止自动关注").arg(dailyFollowLimit()));
+        stopAutoFollowDueToDailyLimit();
+        return;
+    }
+
+    appendLog(QString("重试关注 @%1（同用户第%2次尝试）")
+                  .arg(m_currentFollowingHandle)
+                  .arg(m_sameUserFailCount + 1));
+    m_statusLabel->setText(QString("状态: [自动] 重试关注 @%1...").arg(m_currentFollowingHandle));
+    m_postListPanel->setEnabled(false);
+    m_followedAuthorsTable->setEnabled(false);
+
+    const QString userUrl = QString("https://x.com/%1").arg(m_currentFollowingHandle);
+    if (!m_userBrowserInitialized && m_userBrowser) {
+        m_userBrowserInitialized = true;
+        m_hintLabel->setVisible(false);
+        m_userBrowser->setVisible(true);
+        m_userBrowser->CreateBrowserWithProfile(userUrl, m_dataStorage->getProfilePath());
+    } else if (m_userBrowser) {
+        m_userBrowser->LoadUrl(userUrl);
+    }
+}
+
 void MainWindow::cancelCooldown() {
     if (!m_isCooldownActive && !m_isCheckingFollowBack) {
         return;
@@ -1445,6 +1544,7 @@ void MainWindow::cancelCooldown() {
     m_cooldownTimer->stop();
     m_isCooldownActive = false;
     m_remainingCooldown = 0;
+    m_resumeSameUserAfterCooldown = false;
     m_isCheckingFollowBack = false;
     m_currentCheckingHandle.clear();
     m_cooldownLabel->setVisible(false);
@@ -1461,9 +1561,19 @@ void MainWindow::onCooldownTick() {
         m_cooldownTimer->stop();
         m_isCooldownActive = false;
         m_cooldownLabel->setVisible(false);
+        m_cooldownLabel->setStyleSheet(
+            "QLabel { background-color: #ff6b6b; color: white; font-size: 16px; font-weight: bold; padding: 10px; }");
         m_postListPanel->setEnabled(true);
         m_statusLabel->setText("状态: 冷却结束，可以继续关注");
         qDebug() << "[INFO] Cooldown ended";
+
+        if (m_resumeSameUserAfterCooldown) {
+            m_resumeSameUserAfterCooldown = false;
+            if (m_isAutoFollowing) {
+                retryCurrentUserFollow();
+            }
+            return;
+        }
 
         // 如果自动关注开启，继续处理下一个
         if (m_isAutoFollowing) {
@@ -1476,6 +1586,17 @@ void MainWindow::onCooldownTick() {
 }
 
 void MainWindow::updateCooldownDisplay() {
+    if (m_resumeSameUserAfterCooldown) {
+        const int minutes = m_remainingCooldown / 60;
+        const int seconds = m_remainingCooldown % 60;
+        const QString text = QString("同用户重试冷却: %1:%2 后重试 @%3")
+                                 .arg(minutes, 2, 10, QChar('0'))
+                                 .arg(seconds, 2, 10, QChar('0'))
+                                 .arg(m_currentFollowingHandle);
+        m_cooldownLabel->setText(text);
+        m_statusLabel->setText(QString("状态: 同用户重试冷却，剩余 %1 秒").arg(m_remainingCooldown));
+        return;
+    }
     QString text = QString("冷却中: %1 秒后可继续关注").arg(m_remainingCooldown);
     m_cooldownLabel->setText(text);
     m_statusLabel->setText(QString("状态: 冷却中，请等待 %1 秒").arg(m_remainingCooldown));
@@ -1610,6 +1731,9 @@ void MainWindow::onAutoFollowToggled() {
             cancelCooldown();
             appendLog("已手动停止自动关注，冷却取消");
         }
+        m_sameUserFailCount = 0;
+        m_resumeSameUserAfterCooldown = false;
+        m_currentFollowingHandle.clear();
 
         // 休眠中手动停止：取消休眠
         if (m_isSleeping) {
@@ -1660,8 +1784,10 @@ void MainWindow::processNextAutoFollow() {
 
         // 找到了，执行关注
         qDebug() << "[INFO] Auto-follow: processing" << post.authorHandle;
+        m_sameUserFailCount = 0;
+        m_resumeSameUserAfterCooldown = false;
         m_currentFollowingHandle = post.authorHandle;
-        m_statusLabel->setText(QString("状态: [自动] 正在关注 @%1...").arg(post.authorHandle));
+        m_statusLabel->setText(QString("状态: [自动] 打开 @%1 主页并浏览后关注...").arg(post.authorHandle));
 
         // 首次点击时初始化右侧浏览器
         if (!m_userBrowserInitialized && m_userBrowser) {

@@ -1,0 +1,15 @@
+---
+description: 编译后必须同时部署到 xfollowing 与 xfollowing-release
+alwaysApply: true
+---
+
+# 构建输出目录
+
+每次编译本程序（`build_win.bat`、`cmake --build`、或手动部署）后：
+
+1. **必须**把可执行文件及运行所需输出（exe、Qt/CEF DLL、插件、pak 等）同时放到：
+   - `D:\program\xfollowing\xfollowing`
+   - `D:\program\xfollowing\xfollowing-release`
+2. 优先跑仓库根目录的 `build_win.bat`（已含双目录部署）。
+3. 若只编了 `xfollowing\`，须再同步到 `xfollowing-release\`。
+4. 同步时**不要覆盖**用户数据：`data\`、`userdata\`、`logs\`、`backups\`、`userlist\`、`settings.ini`。

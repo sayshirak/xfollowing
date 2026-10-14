@@ -29,8 +29,6 @@ QString AutoFollower::getFollowScript(const QString& selectedLang, double maxFol
 (function() {
     const pathParts = window.location.pathname.split('/');
     const userHandle = pathParts[1] || '';
-    let retryCount = 0;
-    const maxRetries = 2;
     const maxFollowerRatio = )JS");
     script += QString::number(maxFollowerRatio, 'g', 15);
     script += QString::fromUtf8(R"JS(;
@@ -256,6 +254,88 @@ QString AutoFollower::getFollowScript(const QString& selectedLang, double maxFol
         return null;
     }
 
+    function isMediaHeavyPost(article) {
+        return !!(article.querySelector(
+            '[data-testid="videoPlayer"], video, [data-testid="audioComponent"], [data-testid="previewInterstitial"]'
+        ));
+    }
+
+    function expandPostIfNeeded(article) {
+        const showMore = article.querySelector('[data-testid="tweet-text-show-more-link"]');
+        if (showMore) {
+            console.log('[XFOLLOW] Expanding truncated post text');
+            showMore.click();
+            return true;
+        }
+        const candidates = article.querySelectorAll('div[role="button"], span[role="button"], button');
+        for (const el of candidates) {
+            const t = (el.innerText || '').trim().toLowerCase();
+            if (t === 'show more' || t === '显示更多' || t === '展開' || t === '展开') {
+                // 不点开帖内外链，只展开正文
+                console.log('[XFOLLOW] Expanding via show-more button');
+                el.click();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function collectTimelineArticles() {
+        return Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+    }
+
+    // 关注前先浏览 1-5 条文字帖：滚动停留、必要时展开；不点链接、不播音视频
+    function browsePostsThenFollow() {
+        const targetCount = 1 + Math.floor(Math.random() * 5);
+        let browsed = 0;
+        let cursor = 0;
+        let scrollTries = 0;
+        const maxScrollTries = 6;
+        console.log('[XFOLLOW] Will browse ' + targetCount + ' post(s) before follow');
+
+        function finishBrowse() {
+            console.log('[XFOLLOW] Browsed ' + browsed + '/' + targetCount + ' posts, preparing to follow...');
+            setTimeout(findAndClickFollow, 800 + Math.floor(Math.random() * 1200));
+        }
+
+        function browseStep() {
+            if (browsed >= targetCount) {
+                finishBrowse();
+                return;
+            }
+            const articles = collectTimelineArticles();
+            while (cursor < articles.length) {
+                const article = articles[cursor++];
+                if (isMediaHeavyPost(article)) {
+                    console.log('[XFOLLOW] Skip media post while browsing');
+                    continue;
+                }
+                try {
+                    article.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                } catch (e) {
+                    article.scrollIntoView(true);
+                }
+                const dwell = 1200 + Math.floor(Math.random() * 2200);
+                setTimeout(function() {
+                    expandPostIfNeeded(article);
+                    browsed++;
+                    console.log('[XFOLLOW] Browsed post ' + browsed + '/' + targetCount);
+                    setTimeout(browseStep, 400 + Math.floor(Math.random() * 800));
+                }, dwell);
+                return;
+            }
+            if (scrollTries < maxScrollTries && browsed < targetCount) {
+                scrollTries++;
+                window.scrollBy(0, 700 + Math.floor(Math.random() * 400));
+                setTimeout(browseStep, 900);
+                return;
+            }
+            finishBrowse();
+        }
+
+        browseStep();
+    }
+
     function findAndClickFollow() {
         if (checkIfAccountSuspended()) {
             console.log('[XFOLLOW] Account is suspended, skipping...');
@@ -284,9 +364,9 @@ QString AutoFollower::getFollowScript(const QString& selectedLang, double maxFol
         }
         const btn = findFollowButton();
         if (btn) {
-            console.log('[XFOLLOW] Found follow button, clicking... (attempt ' + (retryCount + 1) + ')');
+            console.log('[XFOLLOW] Found follow button, clicking once...');
             btn.click();
-            setTimeout(verifyFollowSuccess, 2000);
+            setTimeout(verifyFollowSuccess, 2500);
         } else {
             if (checkIfOwnProfile()) {
                 console.log('XFOLLOWING_ALREADY_FOLLOWING:' + userHandle);
@@ -296,18 +376,13 @@ QString AutoFollower::getFollowScript(const QString& selectedLang, double maxFol
         }
     }
 
+    // 单次点击由 C++ 侧负责：失败后冷却 2/3 分钟再重试，第三次换人
     function verifyFollowSuccess() {
         if (checkIfFollowing()) {
             console.log('XFOLLOWING_FOLLOW_SUCCESS:' + userHandle);
         } else {
-            retryCount++;
-            if (retryCount <= maxRetries) {
-                console.log('[XFOLLOW] Follow not confirmed, retrying... (' + retryCount + '/' + maxRetries + ')');
-                setTimeout(findAndClickFollow, 1500);
-            } else {
-                console.log('[XFOLLOW] Follow failed after ' + maxRetries + ' retries');
-                console.log('XFOLLOWING_FOLLOW_FAILED:' + userHandle);
-            }
+            console.log('[XFOLLOW] Follow not confirmed after click');
+            console.log('XFOLLOWING_FOLLOW_FAILED:' + userHandle);
         }
     }
 
@@ -344,16 +419,16 @@ QString AutoFollower::getFollowScript(const QString& selectedLang, double maxFol
             const isPageReady = isDocumentReady && (hasAvatar || hasUserProfile) && hasFollowButton;
             if (isPageReady) {
                 clearInterval(interval);
-                console.log('[XFOLLOW] Page ready, waiting 2 seconds before clicking...');
-                setTimeout(findAndClickFollow, 2000);
+                console.log('[XFOLLOW] Page ready, browsing timeline before follow...');
+                setTimeout(browsePostsThenFollow, 1000 + Math.floor(Math.random() * 1000));
             } else if (checkCount >= maxChecks) {
                 clearInterval(interval);
                 if (checkIfAccountSuspended()) {
                     console.log('[XFOLLOW] Account suspended/not exist (timeout), skipping...');
                     console.log('XFOLLOWING_ACCOUNT_SUSPENDED:' + userHandle);
                 } else {
-                    console.log('[XFOLLOW] Page load timeout, trying anyway...');
-                    setTimeout(findAndClickFollow, 1500);
+                    console.log('[XFOLLOW] Page load timeout, browsing then trying follow...');
+                    setTimeout(browsePostsThenFollow, 800);
                 }
             }
         }, 500);

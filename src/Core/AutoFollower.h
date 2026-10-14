@@ -12,7 +12,7 @@ class AutoFollower : public QObject {
 public:
     explicit AutoFollower(QObject* parent = nullptr);
 
-    // 获取关注脚本（含语言过滤 + 黑名单 + 粉丝/关注数比值过滤）
+    // 获取关注脚本：先浏览 1-5 条帖再单次点击关注（失败重试由 UI 层冷却控制）
     QString getFollowScript(const QString& selectedLang, double maxFollowerRatio = 1.5,
                             const QList<Keyword>& blacklistKeywords = {});
 

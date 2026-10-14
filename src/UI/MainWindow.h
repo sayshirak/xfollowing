@@ -97,6 +97,8 @@ private:
     void updateStatusBar();
     void injectMonitorScript();
     void startCooldown();
+    void startSameUserRetryCooldown(int seconds);  // 同用户关注失败后的重试冷却
+    void retryCurrentUserFollow();                 // 冷却结束后重新打开当前用户主页关注
     void cancelCooldown();  // 停止自动关注时取消冷却（含回关检查状态）
     void updateCooldownDisplay();
     void updateFollowedAuthorsTable();
@@ -188,6 +190,8 @@ private:
 
     // 当前正在关注的用户
     QString m_currentFollowingHandle;
+    int m_sameUserFailCount;           // 当前用户已失败次数（1/2 冷却重试，3 换人）
+    bool m_resumeSameUserAfterCooldown; // 冷却结束后是否重试同一用户
 
     // 冷却时间
     QTimer* m_cooldownTimer;
