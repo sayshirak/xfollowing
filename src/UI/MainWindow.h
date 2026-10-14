@@ -50,6 +50,7 @@ private slots:
     void onFollowFailed(const QString& userHandle);
     void onFollowSkippedLang(const QString& userHandle);
     void onFollowSkippedRatio(const QString& userHandle, const QString& detail);
+    void onFollowSkippedBlacklist(const QString& userHandle, const QString& keyword);
     void onAccountSuspended(const QString& userHandle);
     void onHideFollowedChanged(bool checked);
     void onKeywordsChanged();
@@ -109,8 +110,9 @@ private:
     QString writeUserListCsv(const QList<QStringList>& rows, QString* errorOut);
     // 从 exe 旁 userlist/ 加载最新 userlist-yyyy-MM-dd.csv 的 authorHandle 作为取关白名单
     void loadUnfollowWhitelist();
-    // 若名称或 ID 包含任一黑名单词，返回命中的词；否则返回空
-    QString matchBlacklistKeyword(const QString& authorName, const QString& authorHandle) const;
+    // 若名称、ID 或简介包含任一黑名单词，返回命中的词；否则返回空
+    QString matchBlacklistKeyword(const QString& authorName, const QString& authorHandle,
+                                  const QString& bio = QString()) const;
     // 若本地日期与 todayDate 不同则归零；persist=true 时写回 settings.ini
     void ensureTodayDailyStats(bool persist = true);
     void bumpTodayFollowCount();

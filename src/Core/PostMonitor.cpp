@@ -47,13 +47,14 @@ QString PostMonitor::getMonitorScript(const QList<Keyword>& keywords,
     script += detectJs;
     script += QString::fromUtf8(R"JS(
 
-    function hitsBlacklist(name, handle) {
+    function hitsBlacklist(name, handle, bio) {
         const n = (name || '').toLowerCase();
         const h = (handle || '').toLowerCase();
+        const b = (bio || '').toLowerCase();
         for (const kw of blacklistKeywords) {
             const t = (kw || '').toLowerCase();
             if (!t) continue;
-            if (n.includes(t) || h.includes(t)) return t;
+            if (n.includes(t) || h.includes(t) || b.includes(t)) return t;
         }
         return null;
     }
@@ -161,16 +162,6 @@ QString PostMonitor::getMonitorScript(const QList<Keyword>& keywords,
                 };
             }
 
-            const bl = hitsBlacklist(authorName, authorHandle);
-            if (bl) {
-                return {
-                    reject: 'blacklist',
-                    handle: authorHandle,
-                    name: authorName,
-                    why: who + namePart + ' 命中黑名单关键词="' + bl + '"，跳过'
-                };
-            }
-
             const verifiedBadge = article.querySelector('[data-testid="icon-verified"]') ||
                                   article.querySelector('svg[aria-label="Verified account"]') ||
                                   article.querySelector('svg[aria-label="已认证帐号"]') ||
@@ -230,6 +221,16 @@ QString PostMonitor::getMonitorScript(const QList<Keyword>& keywords,
             const postTime = timeElement ? timeElement.getAttribute('datetime') : '';
 
             const bio = extractBioFromArticle(article);
+            const bl = hitsBlacklist(authorName, authorHandle, bio);
+            if (bl) {
+                return {
+                    reject: 'blacklist',
+                    handle: authorHandle,
+                    name: authorName,
+                    why: who + namePart + ' 名称/ID/简介命中黑名单关键词="' + bl + '"' +
+                         (bio ? (' 简介="' + clipText(bio, 40) + '"') : ' 简介=(空)') + '，跳过'
+                };
+            }
             const nameLang = xfollowDetectLanguage(authorName);
             const bioTrim = (bio || '').trim();
             const bioLang = bioTrim ? xfollowDetectLanguage(bioTrim) : 'other';
@@ -391,13 +392,14 @@ QString PostMonitor::getFollowersMonitorScript(const QString& selectedLang,
     script += detectJs;
     script += QString::fromUtf8(R"JS(
 
-    function hitsBlacklist(name, handle) {
+    function hitsBlacklist(name, handle, bio) {
         const n = (name || '').toLowerCase();
         const h = (handle || '').toLowerCase();
+        const b = (bio || '').toLowerCase();
         for (const kw of blacklistKeywords) {
             const t = (kw || '').toLowerCase();
             if (!t) continue;
-            if (n.includes(t) || h.includes(t)) return t;
+            if (n.includes(t) || h.includes(t) || b.includes(t)) return t;
         }
         return null;
     }
@@ -486,7 +488,6 @@ QString PostMonitor::getFollowersMonitorScript(const QString& selectedLang,
             if (!userName) userName = userHandle;
 
             if (!userHandle) return { reject: 'no_handle' };
-            if (hitsBlacklist(userName, userHandle)) return { reject: 'blacklist' };
 
             const verifiedBadge = userCell.querySelector('[data-testid="icon-verified"]') ||
                                   userCell.querySelector('svg[aria-label="Verified account"]') ||
@@ -505,6 +506,7 @@ QString PostMonitor::getFollowersMonitorScript(const QString& selectedLang,
             }
 
             const bio = extractBioFromUserCell(userCell);
+            if (hitsBlacklist(userName, userHandle, bio)) return { reject: 'blacklist' };
             const langOk = xfollowPassesLanguageFilter(userName, bio, selectedLang);
             if (!langOk) return { reject: 'lang_fail' };
 

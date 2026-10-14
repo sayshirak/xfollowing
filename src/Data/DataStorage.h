@@ -21,7 +21,7 @@ public:
     void removeKeyword(const QString& keywordId);
     void updateKeyword(const Keyword& keyword);
 
-    // 黑名单关键词（名称/ID 包含则不监控、不关注；默认空）
+    // 黑名单关键词（名称/ID/简介包含则不监控、不关注；默认空）
     QList<Keyword> loadBlacklistKeywords();
     void saveBlacklistKeywords(const QList<Keyword>& keywords);
 

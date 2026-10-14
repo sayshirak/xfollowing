@@ -1,8 +1,10 @@
 #ifndef AUTOFOLLOWER_H
 #define AUTOFOLLOWER_H
 
+#include "Data/Keyword.h"
 #include <QObject>
 #include <QString>
+#include <QList>
 
 class AutoFollower : public QObject {
     Q_OBJECT
@@ -10,8 +12,9 @@ class AutoFollower : public QObject {
 public:
     explicit AutoFollower(QObject* parent = nullptr);
 
-    // 获取关注脚本（含语言过滤 + 粉丝/关注数比值过滤）
-    QString getFollowScript(const QString& selectedLang, double maxFollowerRatio = 1.5);
+    // 获取关注脚本（含语言过滤 + 黑名单 + 粉丝/关注数比值过滤）
+    QString getFollowScript(const QString& selectedLang, double maxFollowerRatio = 1.5,
+                            const QList<Keyword>& blacklistKeywords = {});
 
     // 获取回关检查脚本（检查对方是否关注我）
     QString getCheckFollowBackScript();

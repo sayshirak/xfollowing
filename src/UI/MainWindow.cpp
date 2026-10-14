@@ -378,7 +378,7 @@ void MainWindow::setupUI() {
     m_keywordPanel->setKeywords(m_keywords);
     m_blacklistPanel = new KeywordPanel("黑名单关键词", false, false, m_centerPanel);
     m_blacklistPanel->setKeywords(m_blacklistKeywords);
-    m_blacklistPanel->setToolTip("名称或 ID 包含这些词的用户不会被监控，也不会被关注");
+    m_blacklistPanel->setToolTip("名称、ID 或简介包含这些词的用户不会被监控，也不会被关注");
     keywordRow->addWidget(m_keywordPanel, 1);
     keywordRow->addWidget(m_blacklistPanel, 1);
     centerLayout->addLayout(keywordRow);
@@ -503,6 +503,7 @@ void MainWindow::setupConnections() {
     connect(m_userBrowser, &BrowserWidget::followFailed, this, &MainWindow::onFollowFailed);
     connect(m_userBrowser, &BrowserWidget::followSkippedLang, this, &MainWindow::onFollowSkippedLang);
     connect(m_userBrowser, &BrowserWidget::followSkippedRatio, this, &MainWindow::onFollowSkippedRatio);
+    connect(m_userBrowser, &BrowserWidget::followSkippedBlacklist, this, &MainWindow::onFollowSkippedBlacklist);
     connect(m_userBrowser, &BrowserWidget::exportUsersBatch, this, &MainWindow::onExportUsersBatch);
     connect(m_userBrowser, &BrowserWidget::exportUsersDone, this, &MainWindow::onExportUsersDone);
     connect(m_userBrowser, &BrowserWidget::exportUsersError, this, &MainWindow::onExportUsersError);
@@ -914,7 +915,8 @@ void MainWindow::onUserLoadFinished(bool success) {
         m_statusLabel->setText(QString("状态: 正在关注 @%1...").arg(m_currentFollowingHandle));
 
         // 执行自动关注脚本（比值每次从 settings.ini 的 followerRatio 读取，默认 1.5）
-        QString script = m_autoFollower->getFollowScript(m_selectedLanguage, followerRatio());
+        QString script = m_autoFollower->getFollowScript(m_selectedLanguage, followerRatio(),
+                                                         m_blacklistKeywords);
         m_userBrowser->ExecuteJavaScript(script);
     }
 }
@@ -939,9 +941,9 @@ void MainWindow::onPostClicked(const Post& post) {
         return;
     }
 
-    const QString hit = matchBlacklistKeyword(post.authorName, post.authorHandle);
+    const QString hit = matchBlacklistKeyword(post.authorName, post.authorHandle, post.bio);
     if (!hit.isEmpty()) {
-        appendLog(QString("跳过 @%1：名称/ID 含黑名单词「%2」").arg(post.authorHandle).arg(hit));
+        appendLog(QString("跳过 @%1：名称/ID/简介含黑名单词「%2」").arg(post.authorHandle).arg(hit));
         m_statusLabel->setText(QString("状态: @%1 命中黑名单，已跳过").arg(post.authorHandle));
         return;
     }
@@ -1028,8 +1030,8 @@ void MainWindow::onNewPostsFound(const QString& jsonData) {
         post.nameLang = nameLang;
         post.bioLang = bioLang;
 
-        // 黑名单：名称或 ID 包含关键词则不入库
-        const QString blHit = matchBlacklistKeyword(post.authorName, post.authorHandle);
+        // 黑名单：名称、ID 或简介包含关键词则不入库
+        const QString blHit = matchBlacklistKeyword(post.authorName, post.authorHandle, post.bio);
         if (!blHit.isEmpty()) {
             ++skipBlacklist;
             appendLog(QString("搜索入库跳过[黑名单]: %1 命中=\"%2\"")
@@ -1192,6 +1194,30 @@ void MainWindow::onFollowSkippedLang(const QString& userHandle) {
     }
 }
 
+void MainWindow::onFollowSkippedBlacklist(const QString& userHandle, const QString& detail) {
+    // detail: handle|keyword
+    const QString keyword = detail.section('|', 1, 1);
+    qDebug() << "[INFO] Follow skipped by blacklist:" << detail;
+
+    appendLog(QString("跳过 @%1：主页名称/ID/简介含黑名单词「%2」")
+                  .arg(userHandle, keyword.isEmpty() ? QStringLiteral("?") : keyword));
+    m_statusLabel->setText(QString("状态: @%1 命中黑名单，已跳过").arg(userHandle));
+    m_currentFollowingHandle.clear();
+
+    for (int i = m_posts.size() - 1; i >= 0; --i) {
+        if (m_posts[i].authorHandle == userHandle) {
+            m_posts.removeAt(i);
+        }
+    }
+    m_dataStorage->savePosts(m_posts);
+    m_postListPanel->setPosts(m_posts);
+    updateStatusBar();
+
+    if (m_isAutoFollowing) {
+        QTimer::singleShot(1000, this, &MainWindow::processNextAutoFollow);
+    }
+}
+
 void MainWindow::onFollowSkippedRatio(const QString& userHandle, const QString& detail) {
     qDebug() << "[INFO] Follow skipped by ratio:" << detail;
 
@@ -1282,15 +1308,17 @@ void MainWindow::onBlacklistKeywordsChanged() {
     appendLog(QString("黑名单关键词已更新（%1 个）").arg(m_blacklistKeywords.size()));
 }
 
-QString MainWindow::matchBlacklistKeyword(const QString& authorName, const QString& authorHandle) const {
+QString MainWindow::matchBlacklistKeyword(const QString& authorName, const QString& authorHandle,
+                                          const QString& bio) const {
     const QString name = authorName.toLower();
     const QString handle = authorHandle.toLower();
+    const QString bioLower = bio.toLower();
     for (const Keyword& kw : m_blacklistKeywords) {
         if (!kw.isEnabled || kw.text.isEmpty()) {
             continue;
         }
         const QString t = kw.text.toLower();
-        if (name.contains(t) || handle.contains(t)) {
+        if (name.contains(t) || handle.contains(t) || bioLower.contains(t)) {
             return kw.text;
         }
     }
@@ -1619,9 +1647,9 @@ void MainWindow::processNextAutoFollow() {
         }
 
         // 黑名单：移除并继续下一个
-        const QString hit = matchBlacklistKeyword(post.authorName, post.authorHandle);
+        const QString hit = matchBlacklistKeyword(post.authorName, post.authorHandle, post.bio);
         if (!hit.isEmpty()) {
-            appendLog(QString("跳过 @%1：名称/ID 含黑名单词「%2」").arg(post.authorHandle).arg(hit));
+            appendLog(QString("跳过 @%1：名称/ID/简介含黑名单词「%2」").arg(post.authorHandle).arg(hit));
             m_posts.removeAt(i);
             --i;
             m_dataStorage->savePosts(m_posts);
@@ -2410,7 +2438,7 @@ void MainWindow::onNewFollowersFound(const QString& jsonData) {
             post.nameLang = nameLang;
             post.bioLang = bioLang;
 
-            if (!matchBlacklistKeyword(post.authorName, post.authorHandle).isEmpty()) {
+            if (!matchBlacklistKeyword(post.authorName, post.authorHandle, post.bio).isEmpty()) {
                 ++skipBlacklist;
                 continue;
             }

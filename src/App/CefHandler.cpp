@@ -299,6 +299,13 @@ bool CefHandler::OnConsoleMessage(CefRefPtr<CefBrowser> browser,
         writeLog("[FOLLOW_SKIP_RATIO] " + payload);
         emit followSkippedRatio(userHandle, payload);
     }
+    // X互关宝: 黑名单跳过关注  handle|keyword
+    else if (msg.startsWith("XFOLLOWING_FOLLOW_SKIP_BLACKLIST:")) {
+        QString payload = msg.mid(33);
+        QString userHandle = payload.section('|', 0, 0);
+        writeLog("[FOLLOW_SKIP_BLACKLIST] " + payload);
+        emit followSkippedBlacklist(userHandle, payload);
+    }
     // X互关宝: 账号被封禁
     else if (msg.startsWith("XFOLLOWING_ACCOUNT_SUSPENDED:")) {
         QString userHandle = msg.mid(29);

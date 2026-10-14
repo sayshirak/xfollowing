@@ -1,16 +1,28 @@
 #include "AutoFollower.h"
 #include "Utils/LanguageFilter.h"
+#include <QJsonArray>
+#include <QJsonDocument>
 
 AutoFollower::AutoFollower(QObject* parent)
     : QObject(parent) {
 }
 
-QString AutoFollower::getFollowScript(const QString& selectedLang, double maxFollowerRatio) {
+QString AutoFollower::getFollowScript(const QString& selectedLang, double maxFollowerRatio,
+                                      const QList<Keyword>& blacklistKeywords) {
     QString selectedJson = LanguageFilter::buildSelectedLangJson(selectedLang);
     QString detectJs = LanguageFilter::jsDetectLanguageFunction();
     if (maxFollowerRatio <= 0.0) {
         maxFollowerRatio = 1.5;
     }
+
+    QJsonArray blArr;
+    for (const auto& kw : blacklistKeywords) {
+        if (kw.isEnabled && !kw.text.isEmpty()) {
+            blArr.append(kw.text);
+        }
+    }
+    const QString blacklistJson =
+        QString::fromUtf8(QJsonDocument(blArr).toJson(QJsonDocument::Compact));
 
     // Custom delimiter R"JS(...)JS" avoids MSVC QStringLiteral macro paren issues
     QString script = QString::fromUtf8(R"JS(
@@ -24,6 +36,9 @@ QString AutoFollower::getFollowScript(const QString& selectedLang, double maxFol
     script += QString::fromUtf8(R"JS(;
     const selectedLang = )JS");
     script += selectedJson;
+    script += QString::fromUtf8(R"JS(;
+    const blacklistKeywords = )JS");
+    script += blacklistJson;
     script += QString::fromUtf8(R"JS(;
 )JS");
     script += detectJs;
@@ -43,6 +58,31 @@ QString AutoFollower::getFollowScript(const QString& selectedLang, double maxFol
     function getProfileBio() {
         const desc = document.querySelector('[data-testid="UserDescription"]');
         return desc ? (desc.innerText || '').trim() : '';
+    }
+
+    function hitsBlacklist(name, handle, bio) {
+        const n = (name || '').toLowerCase();
+        const h = (handle || '').toLowerCase();
+        const b = (bio || '').toLowerCase();
+        for (const kw of blacklistKeywords) {
+            const t = (kw || '').toLowerCase();
+            if (!t) continue;
+            if (n.includes(t) || h.includes(t) || b.includes(t)) return t;
+        }
+        return null;
+    }
+
+    function checkBlacklistGate() {
+        const displayName = getProfileDisplayName();
+        const bio = getProfileBio();
+        const hit = hitsBlacklist(displayName, userHandle, bio);
+        if (hit) {
+            console.log('[XFOLLOW] Blacklist gate failed hit=' + hit +
+                        ' name=' + displayName + ' bioLen=' + (bio ? bio.length : 0));
+            console.log('XFOLLOWING_FOLLOW_SKIP_BLACKLIST:' + userHandle + '|' + hit);
+            return false;
+        }
+        return true;
     }
 
     function checkLanguageGate() {
@@ -228,6 +268,9 @@ QString AutoFollower::getFollowScript(const QString& selectedLang, double maxFol
         }
         if (checkIfFollowing()) {
             console.log('XFOLLOWING_ALREADY_FOLLOWING:' + userHandle);
+            return;
+        }
+        if (!checkBlacklistGate()) {
             return;
         }
         if (!checkLanguageGate()) {
