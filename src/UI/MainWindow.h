@@ -95,7 +95,6 @@ private:
     void stopAutoFollowDueToDailyLimit();
     void updateStatusBar();
     void injectMonitorScript();
-    void addPinnedAuthorPost();
     void startCooldown();
     void cancelCooldown();  // 停止自动关注时取消冷却（含回关检查状态）
     void updateCooldownDisplay();

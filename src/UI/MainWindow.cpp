@@ -131,8 +131,17 @@ MainWindow::MainWindow(QWidget* parent)
     }
     m_posts = uniquePosts;
 
-    // 添加固定的作者帖子（永久显示，不会隐藏或删除）
-    addPinnedAuthorPost();
+    // 清理历史上写死的固定作者条目
+    bool removedPinned = false;
+    for (int i = m_posts.size() - 1; i >= 0; --i) {
+        if (m_posts[i].authorHandle.compare(QStringLiteral("4111y80y"), Qt::CaseInsensitive) == 0) {
+            m_posts.removeAt(i);
+            removedPinned = true;
+        }
+    }
+    if (removedPinned) {
+        m_dataStorage->savePosts(m_posts);
+    }
 
     // 初始化帖子监控器
     m_postMonitor = new PostMonitor(this);
@@ -296,17 +305,6 @@ void MainWindow::setupUI() {
         QDesktopServices::openUrl(QUrl::fromLocalFile(path));
     });
     cooldownLayout->addWidget(openDataFolderBtn);
-
-    // 作者链接
-    QLabel* xLink = new QLabel("<a href=\"https://x.com/4111y80y\">X</a>", m_centerPanel);
-    xLink->setOpenExternalLinks(true);
-    xLink->setToolTip("https://x.com/4111y80y");
-    QLabel* githubLink = new QLabel("<a href=\"https://github.com/4111y80y/xfollowing\">GitHub</a>", m_centerPanel);
-    githubLink->setOpenExternalLinks(true);
-    githubLink->setToolTip("https://github.com/4111y80y/xfollowing");
-    cooldownLayout->addWidget(xLink);
-    cooldownLayout->addWidget(new QLabel("|", m_centerPanel));
-    cooldownLayout->addWidget(githubLink);
 
     centerLayout->addLayout(cooldownLayout);
 
@@ -973,9 +971,6 @@ void MainWindow::onNewPostsFound(const QString& jsonData) {
         return;
     }
 
-    // 固定作者的handle
-    const QString pinnedAuthorHandle = "4111y80y";
-
     QJsonArray arr = doc.array();
     int newCount = 0;
     int skipInvalid = 0;
@@ -1077,12 +1072,8 @@ void MainWindow::onNewPostsFound(const QString& jsonData) {
                   .arg(skipInvalid).arg(skipLang).arg(skipBlacklist).arg(skipDup));
 
     if (newCount > 0) {
-        // 排序：固定帖子始终第一，其他按采集时间降序（最新发现的在前）
-        std::sort(m_posts.begin(), m_posts.end(), [&pinnedAuthorHandle](const Post& a, const Post& b) {
-            // 固定帖子始终排第一
-            if (a.authorHandle == pinnedAuthorHandle) return true;
-            if (b.authorHandle == pinnedAuthorHandle) return false;
-            // 其他按采集时间降序（最新发现的在前）
+        // 按采集时间降序（最新发现的在前）
+        std::sort(m_posts.begin(), m_posts.end(), [](const Post& a, const Post& b) {
             return a.collectTime > b.collectTime;
         });
 
@@ -1379,40 +1370,6 @@ void MainWindow::injectMonitorScript() {
              << "blacklist:" << m_blacklistKeywords.size();
 }
 
-void MainWindow::addPinnedAuthorPost() {
-    // 固定的作者帖子（永久显示，不会隐藏或删除）
-    const QString pinnedPostId = "2012906900250378388";
-    const QString pinnedAuthorHandle = "4111y80y";
-    const QString pinnedContent = "X互关宝作者 - 欢迎互关交流!";
-
-    // 检查是否已存在，如果存在则更新内容
-    for (int i = 0; i < m_posts.size(); ++i) {
-        if (m_posts[i].postId == pinnedPostId || m_posts[i].authorHandle == pinnedAuthorHandle) {
-            // 更新内容（确保没有[固定]字样）
-            if (m_posts[i].content != pinnedContent) {
-                m_posts[i].content = pinnedContent;
-                m_dataStorage->updatePost(m_posts[i]);
-            }
-            return;
-        }
-    }
-
-    // 创建固定帖子
-    Post pinnedPost;
-    pinnedPost.postId = pinnedPostId;
-    pinnedPost.authorHandle = pinnedAuthorHandle;
-    pinnedPost.authorName = "X互关宝作者";
-    pinnedPost.authorUrl = "https://x.com/" + pinnedAuthorHandle;
-    pinnedPost.content = pinnedContent;
-    pinnedPost.postUrl = "https://x.com/" + pinnedAuthorHandle + "/status/" + pinnedPostId;
-    pinnedPost.matchedKeyword = "互关";
-    pinnedPost.collectTime = QDateTime::currentDateTime();
-    pinnedPost.isFollowed = false;
-
-    // 添加到列表开头
-    m_posts.prepend(pinnedPost);
-}
-
 void MainWindow::startCooldown() {
     // 获取用户设置的冷却时间范围
     m_cooldownMinSeconds = m_cooldownMinSpinBox->value();
@@ -1647,39 +1604,9 @@ void MainWindow::processNextAutoFollow() {
         return;
     }
 
-    // 固定作者的handle（优先处理）
-    const QString pinnedAuthorHandle = "4111y80y";
-
-    // 优先查找固定帖子（如果未关注）
-    for (const auto& post : m_posts) {
-        if (post.authorHandle == pinnedAuthorHandle && !post.isFollowed) {
-            // 固定帖子未关注，优先处理
-            qDebug() << "[INFO] Auto-follow: processing pinned author" << post.authorHandle;
-            m_currentFollowingHandle = post.authorHandle;
-            m_statusLabel->setText(QString("状态: [自动] 正在关注 @%1...").arg(post.authorHandle));
-
-            if (!m_userBrowserInitialized && m_userBrowser) {
-                m_userBrowserInitialized = true;
-                m_hintLabel->setVisible(false);
-                m_userBrowser->setVisible(true);
-                QString profilePath = m_dataStorage->getProfilePath();
-                QString userUrl = QString("https://x.com/%1").arg(post.authorHandle);
-                m_userBrowser->CreateBrowserWithProfile(userUrl, profilePath);
-            } else {
-                QString userUrl = QString("https://x.com/%1").arg(post.authorHandle);
-                m_userBrowser->LoadUrl(userUrl);
-            }
-            return;
-        }
-    }
-
-    // 然后查找其他未关注的帖子
+    // 查找未关注的帖子
     for (int i = 0; i < m_posts.size(); ++i) {
         const Post& post = m_posts[i];
-        // 跳过固定帖子（已在上面处理）
-        if (post.authorHandle == pinnedAuthorHandle) {
-            continue;
-        }
         // 跳过已关注的
         if (post.isFollowed) {
             continue;
@@ -1896,10 +1823,6 @@ void MainWindow::checkNextFollowBack() {
         Post& post = m_posts[i];
         // 必须是已关注的
         if (!post.isFollowed) {
-            continue;
-        }
-        // 跳过固定作者
-        if (post.authorHandle == "4111y80y") {
             continue;
         }
         // 白名单用户永不取关，也不做回关检查
@@ -2377,22 +2300,16 @@ void MainWindow::startFollowersBrowsing() {
     // 检查是否有已关注用户
     QList<Post> followedUsers;
     for (const auto& post : m_posts) {
-        if (post.isFollowed && post.authorHandle != "4111y80y") {
+        if (post.isFollowed) {
             followedUsers.append(post);
         }
     }
 
     if (followedUsers.isEmpty()) {
-        int followedTotal = 0;
-        for (const auto& post : m_posts) {
-            if (post.isFollowed) {
-                ++followedTotal;
-            }
-        }
-        appendLog(QString("没有互关用户，暂停粉丝采集（列表共%1条，已关注%2，排除固定作者后为0）")
-                      .arg(m_posts.size()).arg(followedTotal));
+        appendLog(QString("没有互关用户，暂停粉丝采集（列表共%1条，已关注0）")
+                      .arg(m_posts.size()));
         qDebug() << "[INFO] No followed users, pause followers browsing. posts="
-                 << m_posts.size() << "followed=" << followedTotal;
+                 << m_posts.size();
         return;
     }
 
@@ -2407,7 +2324,7 @@ void MainWindow::onFollowersSwitchTimeout() {
     // 获取已关注用户列表
     QList<Post> followedUsers;
     for (const auto& post : m_posts) {
-        if (post.isFollowed && post.authorHandle != "4111y80y") {
+        if (post.isFollowed) {
             followedUsers.append(post);
         }
     }
@@ -2441,9 +2358,6 @@ void MainWindow::onNewFollowersFound(const QString& jsonData) {
     if (!doc.isArray()) {
         return;
     }
-
-    // 固定作者的handle
-    const QString pinnedAuthorHandle = "4111y80y";
 
     QJsonArray arr = doc.array();
     int newCount = 0;
@@ -2513,10 +2427,7 @@ void MainWindow::onNewFollowersFound(const QString& jsonData) {
                   .arg(skipEmpty).arg(skipDup).arg(skipLang).arg(skipBlacklist));
 
     if (newCount > 0) {
-        // 排序：固定帖子始终第一，其他按采集时间降序
-        std::sort(m_posts.begin(), m_posts.end(), [&pinnedAuthorHandle](const Post& a, const Post& b) {
-            if (a.authorHandle == pinnedAuthorHandle) return true;
-            if (b.authorHandle == pinnedAuthorHandle) return false;
+        std::sort(m_posts.begin(), m_posts.end(), [](const Post& a, const Post& b) {
             return a.collectTime > b.collectTime;
         });
 
