@@ -1080,6 +1080,12 @@ void MainWindow::onNewPostsFound(const QString& jsonData) {
         m_postListPanel->setPosts(m_posts);
         updateStatusBar();
         qDebug() << "[INFO] Found" << newCount << "new posts";
+
+        // 自动关注开启但因队列空而空闲时，有新人入库则继续
+        if (m_isAutoFollowing && !m_isCooldownActive && !m_isSleeping
+            && !m_isCheckingFollowBack && m_currentFollowingHandle.isEmpty()) {
+            QTimer::singleShot(500, this, &MainWindow::processNextAutoFollow);
+        }
     }
 }
 
@@ -1644,17 +1650,12 @@ void MainWindow::processNextAutoFollow() {
         return;
     }
 
-    // 没有找到未关注的帖子
-    m_isAutoFollowing = false;
-    m_autoFollowBtn->setChecked(false);
-    m_autoFollowBtn->setText("自动关注");
-    m_statusLabel->setText("状态: 自动关注完成，没有更多待关注用户");
-
-    // 恢复列表点击
+    // 暂无待关注用户：保持自动关注开启，等搜索/粉丝采集继续入库
+    m_statusLabel->setText("状态: 自动关注等待中，暂无待关注用户（搜索继续）");
     m_postListPanel->setEnabled(true);
     m_followedAuthorsTable->setEnabled(true);
-
-    qDebug() << "[INFO] Auto-follow completed: no more users to follow";
+    appendLog("自动关注：暂无待关注用户，保持开启并等待新入库");
+    qDebug() << "[INFO] Auto-follow idle: no unfollowed users, waiting for new intake";
 }
 
 void MainWindow::onAutoRefreshTimeout() {
@@ -2435,5 +2436,10 @@ void MainWindow::onNewFollowersFound(const QString& jsonData) {
         updateStatusBar();
         appendLog(QString("从粉丝列表采集到 %1 个新用户").arg(newCount));
         qDebug() << "[INFO] Found" << newCount << "new followers";
+
+        if (m_isAutoFollowing && !m_isCooldownActive && !m_isSleeping
+            && !m_isCheckingFollowBack && m_currentFollowingHandle.isEmpty()) {
+            QTimer::singleShot(500, this, &MainWindow::processNextAutoFollow);
+        }
     }
 }
