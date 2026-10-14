@@ -257,7 +257,7 @@ bool CefHandler::OnConsoleMessage(CefRefPtr<CefBrowser> browser,
     QString msg = QString::fromStdString(message.ToString());
 
     // Log for debugging
-    if (msg.startsWith("[XFOLLOW]") || msg.startsWith("[DEBUG]")) {
+    if (msg.startsWith("[XFOLLOW]") || msg.startsWith("[XREPLY]") || msg.startsWith("[DEBUG]")) {
         writeLog(msg);
         qDebug() << msg;
     }

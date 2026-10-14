@@ -11,10 +11,10 @@ if exist "D:\program\xfollowing\tools\cmake\bin\cmake.exe" set "PATH=D:\program\
 
 cd /d D:\program\xfollowing
 
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=D:/program/xfollowing/xfollowing
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 if errorlevel 1 exit /b 1
 
-cmake --build build
+cmake --build build --target xfollowing
 if errorlevel 1 exit /b 1
 
 rem Bundle MSVC runtime DLLs so the portable folder runs on PCs without VC++ redistributable

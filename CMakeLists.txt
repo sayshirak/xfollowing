@@ -26,7 +26,6 @@ find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui Network)
 set(CEF_ROOT "D:/soft/cef_binary_154.0.34+g14c5a08+chromium-154.0.8037.98_windows64")
 set(CEF_INCLUDE_PATH "${CEF_ROOT}" "${CEF_ROOT}/include")
 
-# Source files
 set(PROJECT_SOURCES
     src/main.cpp
     # App
@@ -60,19 +59,16 @@ set(PROJECT_SOURCES
     src/Utils/LanguageFilter.cpp
 )
 
-# Create executable
 qt_add_executable(xfollowing
     MANUAL_FINALIZATION
     ${PROJECT_SOURCES}
 )
 
-# Include directories
 target_include_directories(xfollowing PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CEF_INCLUDE_PATH}
 )
 
-# Compile definitions for CEF
 target_compile_definitions(xfollowing PRIVATE
     WIN32
     _WIN32
@@ -83,7 +79,6 @@ target_compile_definitions(xfollowing PRIVATE
     WIN32_LEAN_AND_MEAN
 )
 
-# Link Qt libraries
 target_link_libraries(xfollowing PRIVATE
     Qt6::Core
     Qt6::Widgets
@@ -91,13 +86,11 @@ target_link_libraries(xfollowing PRIVATE
     Qt6::Network
 )
 
-# CEF libraries
 target_link_libraries(xfollowing PRIVATE
     "${CEF_ROOT}/Release/libcef.lib"
     "${CEF_ROOT}/build/libcef_dll_wrapper/Release/libcef_dll_wrapper.lib"
 )
 
-# Windows system libraries required by CEF
 target_link_libraries(xfollowing PRIVATE
     comctl32
     rpcrt4
@@ -106,21 +99,22 @@ target_link_libraries(xfollowing PRIVATE
     delayimp
 )
 
-# Linker flags for delayed loading
 if(MSVC)
     target_link_options(xfollowing PRIVATE
         /DELAYLOAD:libcef.dll
     )
-    # Use UTF-8 source and execution charset
     target_compile_options(xfollowing PRIVATE /utf-8)
 endif()
 
-# Windows specific settings
 set_target_properties(xfollowing PROPERTIES
     WIN32_EXECUTABLE TRUE
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/xfollowing"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_SOURCE_DIR}/xfollowing"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_SOURCE_DIR}/xfollowing"
+    RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_SOURCE_DIR}/xfollowing"
+    RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_SOURCE_DIR}/xfollowing"
 )
 
-# Copy CEF resources after build
 add_custom_command(TARGET xfollowing POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CEF_ROOT}/Release"
@@ -130,7 +124,6 @@ add_custom_command(TARGET xfollowing POST_BUILD
         $<TARGET_FILE_DIR:xfollowing>
 )
 
-# Run windeployqt to copy Qt DLLs
 if(WIN32)
     get_target_property(_qmake_executable Qt6::qmake IMPORTED_LOCATION)
     get_filename_component(_qt_bin_dir "${_qmake_executable}" DIRECTORY)
