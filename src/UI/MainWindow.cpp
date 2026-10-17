@@ -93,6 +93,7 @@ MainWindow::MainWindow(QWidget* parent)
     , m_todayDate(QDate::currentDate())
     , m_todayFollowCount(0)
     , m_todayUnfollowCount(0)
+    , m_dailyStatsTimer(nullptr)
     , m_selectedLanguage(LanguageFilter::defaultLanguage()) {
 
     setWindowTitle("X互关宝 - X.com互关粉丝助手");
@@ -109,6 +110,11 @@ MainWindow::MainWindow(QWidget* parent)
     // 初始化休眠计时器
     m_sleepTimer = new QTimer(this);
     connect(m_sleepTimer, &QTimer::timeout, this, &MainWindow::onSleepTick);
+
+    // 跨日归零：挂机过 0 点也能刷新「当日关注/取关」标签
+    m_dailyStatsTimer = new QTimer(this);
+    connect(m_dailyStatsTimer, &QTimer::timeout, this, &MainWindow::onDailyStatsTick);
+    m_dailyStatsTimer->start(60 * 1000);
 
     // 初始化粉丝切换定时器
     m_followersSwitchTimer = new QTimer(this);
@@ -1404,28 +1410,35 @@ void MainWindow::updateStatusBar() {
 }
 
 void MainWindow::ensureTodayDailyStats(bool persist) {
+    Q_UNUSED(persist);
     const QDate today = QDate::currentDate();
-    if (m_todayDate == today) {
+    if (m_todayDate.isValid() && m_todayDate == today) {
         return;
     }
     m_todayDate = today;
     m_todayFollowCount = 0;
     m_todayUnfollowCount = 0;
-    if (persist) {
-        // 完整写回以保留 followerRatio 等项与中文注释
-        saveSettings();
+    updateDailyStatsLabels();
+    // 跨日一律写回，避免挂机归零后崩溃仍读到昨日计数
+    saveSettings();
+    if (m_logTextEdit) {
+        appendLog(QString("已跨日，当日关注/取关计数已归零（%1）").arg(today.toString(Qt::ISODate)));
     }
 }
 
+void MainWindow::onDailyStatsTick() {
+    ensureTodayDailyStats(true);
+}
+
 void MainWindow::bumpTodayFollowCount() {
-    ensureTodayDailyStats(false);
+    ensureTodayDailyStats(true);
     ++m_todayFollowCount;
     updateDailyStatsLabels();
     saveSettings();
 }
 
 void MainWindow::bumpTodayUnfollowCount() {
-    ensureTodayDailyStats(false);
+    ensureTodayDailyStats(true);
     ++m_todayUnfollowCount;
     updateDailyStatsLabels();
     saveSettings();

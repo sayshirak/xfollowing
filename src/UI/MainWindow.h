@@ -70,6 +70,7 @@ private slots:
     void onUnfollowSuccess(const QString& userHandle);
     void onUnfollowFailed(const QString& userHandle);
     void onSleepTick();  // 休眠计时器
+    void onDailyStatsTick();  // 跨日检查：挂机过 0 点时归零并刷新界面
     void onExportUsers();  // 开始/停止导出 X 上的真实关注列表
     void onExportUsersBatch(const QString& jsonData);
     void onExportUsersDone(int total);
@@ -115,7 +116,7 @@ private:
     // 若名称、ID 或简介包含任一黑名单词，返回命中的词；否则返回空
     QString matchBlacklistKeyword(const QString& authorName, const QString& authorHandle,
                                   const QString& bio = QString()) const;
-    // 若本地日期与 todayDate 不同则归零；persist=true 时写回 settings.ini
+    // 若本地日期与 todayDate 不同则归零、刷新标签并写回 settings.ini
     void ensureTodayDailyStats(bool persist = true);
     void bumpTodayFollowCount();
     void bumpTodayUnfollowCount();
@@ -222,10 +223,11 @@ private:
     int m_remainingSleepSeconds;       // 剩余休眠秒数
     QTimer* m_sleepTimer;              // 休眠计时器
 
-    // 当日关注 / 取关统计（本机本地日期，跨日在启动或下次操作时归零）
+    // 当日关注 / 取关统计（本机本地日期；跨日由定时器或操作时归零）
     QDate m_todayDate;
     int m_todayFollowCount;
     int m_todayUnfollowCount;
+    QTimer* m_dailyStatsTimer;  // 约每分钟检查是否跨日
 };
 
 #endif // MAINWINDOW_H
