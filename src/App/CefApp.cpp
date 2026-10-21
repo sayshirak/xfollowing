@@ -24,10 +24,13 @@ BrowserApp::BrowserApp() {
 void BrowserApp::OnBeforeCommandLineProcessing(
     const CefString& process_type,
     CefRefPtr<CefCommandLine> command_line) {
-    // Disable GPU to avoid crashes on some systems
+    // 不用真实显卡绘制，改走 SwiftShader 软件渲染。
+    // 避免长时间运行把 Intel 显卡拖死，连带桌面 Chrome 一起黑屏。
+    // 不能再关 software rasterizer，否则没有绘制兜底，窗口会一直黑。
     command_line->AppendSwitch("disable-gpu");
     command_line->AppendSwitch("disable-gpu-compositing");
-    command_line->AppendSwitch("disable-software-rasterizer");
+    command_line->AppendSwitchWithValue("use-gl", "angle");
+    command_line->AppendSwitchWithValue("use-angle", "swiftshader");
 
     // Disable sandbox for easier debugging
     command_line->AppendSwitch("no-sandbox");
