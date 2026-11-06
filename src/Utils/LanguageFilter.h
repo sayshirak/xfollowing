@@ -33,7 +33,8 @@ inline QString defaultLanguage() {
 // Detects language; anything not clearly zh/en/ja/ko becomes "other"
 QString detectLanguage(const QString& text);
 
-// 用户名或简介任一为所选语言即通过（简介可为空）
+// 用户名或简介任一为所选语言即通过（简介可为空）。
+// 所选语言不是日语/韩语时，昵称或简介只要出现假名或韩文即不通过。
 bool passesLanguageFilter(const QString& displayName,
                           const QString& bio,
                           const QString& selectedLang,

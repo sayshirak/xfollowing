@@ -25,6 +25,15 @@ bool isLatinLetter(QChar c) {
     return c.isLetter() && c.script() == QChar::Script_Latin;
 }
 
+bool containsKanaOrHangul(const QString& text) {
+    for (const QChar c : text) {
+        if (isHangul(c) || isKana(c)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 // 判定规则（新）：
@@ -87,6 +96,13 @@ bool passesLanguageFilter(const QString& displayName,
     const QString bioLang = bioTrim.isEmpty() ? QStringLiteral("other") : detectLanguage(bioTrim);
     if (outBioLang) *outBioLang = bioLang;
 
+    // 非日语/韩语目标：昵称或简介出现假名或韩文则一律不关注（含回关）
+    if (selectedLang != QLatin1String("ja") && selectedLang != QLatin1String("ko")) {
+        if (containsKanaOrHangul(displayName) || containsKanaOrHangul(bioTrim)) {
+            return false;
+        }
+    }
+
     return (nameLang == selectedLang) || (bioLang == selectedLang);
 }
 
@@ -142,12 +158,28 @@ function xfollowDetectLanguage(text) {
     return 'other';
 }
 
-// 用户名或简介任一为所选语言即通过；简介可为空
+function xfollowContainsKanaOrHangul(text) {
+    const s = String(text || '');
+    for (const ch of s) {
+        const u = ch.codePointAt(0);
+        const hangul = (u >= 0xAC00 && u <= 0xD7AF) || (u >= 0x1100 && u <= 0x11FF) || (u >= 0x3130 && u <= 0x318F);
+        const kana = (u >= 0x3040 && u <= 0x309F) || (u >= 0x30A0 && u <= 0x30FF) || (u >= 0x31F0 && u <= 0x31FF);
+        if (hangul || kana) return true;
+    }
+    return false;
+}
+
+// 用户名或简介任一为所选语言即通过；简介可为空。
+// 所选不是日语/韩语时，昵称或简介出现假名或韩文则不通过（含回关）。
 function xfollowPassesLanguageFilter(displayName, bio, selectedLang) {
     if (!selectedLang) return null;
     const nameLang = xfollowDetectLanguage(displayName);
     const bioTrim = (bio || '').trim();
     const bioLang = bioTrim ? xfollowDetectLanguage(bioTrim) : 'other';
+    if (selectedLang !== 'ja' && selectedLang !== 'ko' &&
+        (xfollowContainsKanaOrHangul(displayName) || xfollowContainsKanaOrHangul(bioTrim))) {
+        return null;
+    }
     if (nameLang !== selectedLang && bioLang !== selectedLang) return null;
     return { nameLang: nameLang, bioLang: bioLang, bio: bioTrim };
 }
